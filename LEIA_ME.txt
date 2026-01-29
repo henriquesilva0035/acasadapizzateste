@@ -1,0 +1,69 @@
+===============================================================
+MANUAL DO SISTEMA DELIVERY & MESAS
+===============================================================
+
+1. COMO LIGAR O SISTEMA (DIA A DIA)
+-----------------------------------
+Você precisa de dois terminais (janelas pretas) abertos.
+
+Terminal 1: O Cérebro (Backend)
+   > cd api
+   > npx tsx server.ts
+   (Aguarde aparecer: "🔥 Servidor rodando...")
+
+Terminal 2: A Tela (Frontend)
+   > cd web
+   > npm run dev -- --host
+   (Isso libera o acesso para celulares na rede Wi-Fi)
+
+---------------------------------------------------------------
+
+2. COMO DESCOBRIR O IP (PARA CONECTAR O CELULAR)
+------------------------------------------------
+   1. Abra um terminal e digite: ipconfig
+   2. Procure por "Endereço IPv4" (Ex: 192.168.0.15)
+   3. No celular, digite: http://192.168.0.15:5173
+
+---------------------------------------------------------------
+
+3. ONDE MUDAR O IP NO CÓDIGO (SE MUDAR DE WI-FI)
+------------------------------------------------
+Se o IP do computador mudar, você precisa avisar o site.
+   1. Abra a pasta "web/src".
+   2. Abra os arquivos "Pdv.tsx" e "Cardapio.tsx".
+   3. Procure onde está "http://192.168.X.X:3333".
+   4. Troque pelo novo IP.
+   * Dica: Use Ctrl+Shift+H no VS Code para trocar em todos os arquivos de uma vez.
+
+---------------------------------------------------------------
+
+4. INSTALAÇÃO DO ZERO (FORMATEI O PC, E AGORA?)
+------------------------------------------------
+   1. Instale o Node.js (site oficial).
+   2. Abra a pasta do projeto no terminal.
+   3. Entre na pasta api e digite: npm install
+   4. Entre na pasta web e digite: npm install
+   5. Crie o banco de dados:
+      > cd api
+      > npx prisma migrate dev --name init
+
+===============================================================
+
+ligar o cloudflared pra api .\cloudflared tunnel --url http://localhost:3333
+
+ligar o ngrok pra website: ngrok http 5173 --domain=unhealthier-varyingly-dorthy.ngrok-free.dev
+
+cloudflared tunnel --url http://localhost:5173
+
+import { API_URL } from './config';
+
+
+TERÇA PIZZA G OU GG GUARANA GRATIS
+QAURTA PIZZA G OU GG PIZZA P SAI COM DESCONTO DE 50%
+QUINTA BORDA CAPUPIRY OU CHEDDAR GRATIS NAS PIZZAS G OU GG
+SEXTA SABADO E DOMINGO GUARANA DE 1 LITRO GRATIS NAS PIZZA G OU GG
+
+
+
+
+Quando formos rodar novamente, vamos precisar apenas forçar uma atualização rápida (o comando npx prisma generate).

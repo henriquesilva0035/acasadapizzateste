@@ -1,0 +1,60 @@
+Poxa, o Cloudflare às vezes oscila mesmo, mas costuma voltar rápido. Se continuar ruim, o Ngrok é o seu "pneu de estepe".
+
+Sobre instalar no cliente: Você **não precisa** de nada complexo, mas o computador do cliente precisa ter o "motor" para rodar o código.
+
+Aqui está o **Checklist do que você precisa fazer no PC do Cliente**:
+
+### 1. Instalar o Node.js (O Motor) ⚙️
+
+O sistema não roda sem isso.
+
+* Baixe e instale a versão **LTS** (Recommended) no site oficial: `nodejs.org`.
+* É só clicar em "Next, Next, Install".
+
+### 2. A Pasta do Projeto 📁
+
+Você disse que compactou tudo.
+
+* **Dica de Ouro:** Se você compactou a pasta `node_modules` junto, o arquivo deve ter ficado gigante e demorado para copiar. O ideal profissional é **apagar** a pasta `node_modules` antes de zipar, e deixar o computador do cliente baixar tudo novinho (é mais rápido e evita erros).
+* **O Banco de Dados:** Se você quer que o cliente já pegue o cardápio que você cadastrou, certifique-se de que o arquivo `api/dev.db` foi junto no zip.
+
+### 3. Configurar no Cliente (Passo a Passo)
+
+Depois de descompactar a pasta no PC dele:
+
+1. **Abra o terminal** na pasta do projeto.
+2. **(Se você não levou a node_modules):** Rode o comando:
+```bash
+npm install
+
+```
+
+
+*(Ele vai baixar tudo rapidinho).*
+3. **Atualizar o Banco de Dados:** Para garantir que as tabelas novas (Grupos de Opções) funcionem lá, rode:
+```bash
+npx prisma migrate deploy
+
+```
+
+
+*(Ou `npx prisma migrate dev` se der erro).*
+4. **Gerar o Cliente do Banco:** Às vezes o Prisma se perde ao mudar de PC. Por garantia, rode:
+```bash
+npx prisma generate
+
+```
+
+
+
+### 4. Atalho na Área de Trabalho
+
+Copie aquele seu arquivo `INICIAR_SISTEMA.bat` para a Área de Trabalho dele para ficar profissional.
+
+### Resumo: O que o PC dele precisa ter?
+
+1. **Node.js** instalado.
+2. **Git** (Opcional, mas bom ter).
+3. **Cloudflared.exe** (dentro da pasta do projeto, se ele for usar o Delivery Online).
+
+Se fizer isso, vai rodar idêntico ao seu! 🚀

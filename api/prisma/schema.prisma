@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Table {
+  id               Int     @id @default(autoincrement())
+  label            String  @default("Mesa")
+  status           String  @default("OPEN")
+  customerName     String?
+  waiterName       String?
+  currentSessionId String?
+  currentSessionCode String?
+  orders           Order[]
+}
+
+model Order {
+  idString        String      @id @default(uuid())
+  customerId      Int?
+  customer        Customer?   @relation(fields: [customerId], references: [id])
+  customerName    String?
+  waiterName      String?
+  waiterId      Int?
+  waiter        User?    @relation(fields: [waiterId], references: [id])
+  customerPhone   String?
+  customerAddress String?
+  observation   String?
+  tableId         Int?
+  table           Table?      @relation(fields: [tableId], references: [id])
+  tableSessionId  String?
+  tableSessionCode String?
+  total           Float
+  deliveryFee     Float?
+  canceledAt      DateTime?
+  cancelReason    String?
+  closedAt        DateTime?
+  status          String      @default("PENDING")
+  origin          String      @default("LOCAL")
+  isTakeout       Boolean     @default(false)
+  paymentMethod   String?
+  createdAt       DateTime    @default(now())
+  updatedAt DateTime @updatedAt
+  items           OrderItem[]
+  payments        OrderPayment[]
+  syncedAt        DateTime?
+}
+
+// Pagamentos (para permitir múltiplos meios e divisão)
+model OrderPayment {
+  id        Int      @id @default(autoincrement())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [idString], onDelete: Cascade)
+  method    String
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([method])
+}
+
+
+model OrderItem {
+  idString    String  @id @default(uuid())
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [idString], onDelete: Cascade)
+  product     String
+  quantity    Int
+  price       Float
+  category    String  @default("OUTROS")
+  description String?
+  customerName String?  // Nome do cliente dono deste item específico
+  observation String?
+  additions   String?
+
+  // 🆕 CAMPOS DE PIZZA (alinhar com banco)
+  flavors     String?
+  border      String?
+  extras      String?
+}
+
+
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  phone     String   @unique
+  name      String
+  address   String?
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+}
+
+// --- ESTRUTURA NOVA DE PRODUTOS COM GRUPOS ---
+model Product {
+  id           Int                  @id @default(autoincrement())
+  name         String
+  description  String?
+  price        Float
+  promoPrice   Float?
+  promoDays    String?  // NOVO: Ex: "1,2,3" (0=Dom, 1=Seg...)
+  image        String
+  category     String
+  optionGroups ProductOptionGroup[] // Um produto tem vários grupos (ex: Carne, Molhos)
+  available   Boolean @default(true)
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+
+
+
+model ProductOptionGroup {
+  id        Int                 @id @default(autoincrement())
+  productId Int
+  product   Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title     String // Ex: "Escolha a Carne", "Turbine seu lanche"
+  min       Int                 @default(0) // 0 = Opcional, 1 = Obrigatório
+  max       Int                 @default(1) // 1 = Só um (Radio), >1 = Vários (Checkbox)
+  chargeMode String              @default("SUM") // SUM (somar), MAX (pegar maior), MIN (pegar menor)
+  available Boolean              @default(true)
+  items     ProductOptionItem[]
+}
+
+model ProductOptionItem {
+  id          Int                @id @default(autoincrement())
+  groupId     Int
+  group       ProductOptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name        String // Ex: "Carne de Sol", "Bacon"
+  price       Float // Ex: 0.00 ou 3.00
+  description String?
+  imageUrl    String?
+  available   Boolean            @default(true)
+}
+
+model User {
+  id   Int    @id @default(autoincrement())
+  name String
+  pin  String @unique
+ 
+  role  String  @default("WAITER") // "ADMIN" ou "WAITER"
+  
+  orders  Order[] // <--- ADICIONE ISSO (Lista de pedidos do garçom)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+}
+
+// --- SISTEMA DE MARKETING E PROMOÇÕES ---
+
+model Promotion {
+  id          Int      @id @default(autoincrement())
+  name        String   // Ex: "Terça do Refri"
+  description String?  // Ex: "Ganhe um refri na compra de Pizza G"
+  active      Boolean  @default(true)
+  
+  // Dias da semana em que funciona (Ex: "1,2,5" para Seg, Ter, Sex)
+  daysOfWeek  String   
+  
+  // TIPO DA REGRA: 
+  // "DISCOUNT" (Desconto em % no segundo item)
+  // "FREE_ITEM" (Item grátis condicional)
+  // "FREE_BORDER" (Borda grátis)
+  type        String   
+
+  // GATILHO: O que o cliente tem que comprar?
+  // Pode ser uma Categoria (ex: "Pizzas") ou trecho do nome (ex: "GG")
+  triggerType  String  // "CATEGORY" ou "NAME_CONTAINS"
+  triggerValue String  // Ex: "Pizzas" ou "GG"
+
+  // ALVO: O que ganha o desconto?
+  // Ex: "Borda", "Guarana", "Pizza P"
+  targetType   String  // "BORDER", "PRODUCT_NAME", "CATEGORY"
+  targetValue  String  // Ex: "Catupiry", "Guarana", "Pizzas"
+
+  // VALOR DO BENEFÍCIO
+  // 100 = 100% OFF (Grátis), 50 = 50% OFF
+  discountPercent Float 
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Configurações Gerais da Loja (Banner, Avisos, etc)
+model StoreSettings {
+  id           Int     @id @default(autoincrement())
+  bannerText   String? // Aquele texto que vai ficar passando
+  bannerActive Boolean @default(true)
+}
+
+
+// --- SISTEMA DE ENTREGA POR BAIRRO ---
+model Neighborhood {
+  id        Int     @id @default(autoincrement())
+  name      String  // Ex: "Centro"
+  price     Float   // Ex: 5.00
+  active    Boolean @default(true)
+}

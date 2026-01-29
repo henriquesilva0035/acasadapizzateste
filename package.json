@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@fastify/multipart": "^9.4.0",
+    "@fastify/static": "^9.0.0",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0"
+  }
+}

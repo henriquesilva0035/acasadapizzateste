@@ -1,0 +1,334 @@
+:root{
+  --red: #B30000;
+  --yellow: #F2B705;
+  --white: #FFFFFF;
+  --bg: #F5F6F8;
+  --text: #121826;
+  --muted: #6B7280;
+}
+
+*{ box-sizing: border-box; }
+
+.menuPage{
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.menuHeader{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: linear-gradient(135deg, #8f0000, var(--red));
+  padding: 14px 14px 10px 14px;
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 18px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.18);
+}
+
+.menuHeaderTop{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brandLeft{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandLogo{
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--white);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+/* se usar img dentro, ela já fica ok */
+.brandLogo img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brandInitials{
+  font-weight: 900;
+  color: var(--red);
+}
+
+.brandInfo{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.brandName{
+  font-weight: 900;
+  color: var(--white);
+  letter-spacing: 0.4px;
+}
+
+.brandMeta{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255,255,255,0.88);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dotOpen{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #00c853;
+  box-shadow: 0 0 0 3px rgba(0,200,83,0.18);
+}
+
+.sep{ opacity: 0.55; }
+
+.iconBtn{
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.10);
+  color: var(--white);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.heroCard{
+  margin-top: 10px;
+  background: rgba(12, 18, 32, 0.78);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.heroTitle{
+  color: var(--white);
+  font-weight: 1000;
+  font-size: 18px;
+}
+
+.heroSub{
+  margin-top: 6px;
+  color: rgba(255,255,255,0.82);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.catsRow{
+  margin-top: 12px;
+}
+
+.catsScroll{
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.catsScroll::-webkit-scrollbar{ display: none; }
+
+.catChip{
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.92);
+  font-weight: 900;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.catChip.active{
+  background: var(--yellow);
+  color: #111;
+  border-color: rgba(0,0,0,0.10);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.18);
+}
+
+.menuContent{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px;
+}
+
+.muted{ color: var(--muted); }
+
+.catSection{
+  margin-top: 14px;
+}
+
+.catTitle{
+  font-weight: 1000;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #7a8699;
+  margin: 10px 4px;
+}
+
+.cardsGrid{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 720px){
+  .cardsGrid{
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.productCard{
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+
+  background: var(--white);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 14px 26px rgba(16,24,40,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.productLeft{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.productName{
+  font-weight: 950;
+  font-size: 15px;
+}
+
+.productDesc{
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.25rem;
+  max-width: 44ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.productPriceRow{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.oldPrice{
+  color: #9aa3b2;
+  text-decoration: line-through;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.newPrice{
+  color: var(--red);
+  font-weight: 1000;
+  font-size: 14px;
+}
+
+.pill{
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(179,0,0,0.08);
+  color: var(--red);
+}
+
+.productImgBox{
+  width: 66px;
+  height: 66px;
+  border-radius: 18px;
+  background: #f2f3f5;
+  border: 1px solid rgba(0,0,0,0.06);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.productImg{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.productEmoji{
+  font-size: 34px;
+}
+
+
+/* CATEGORIAS SOLTAS (não grudadas no topo vermelho) */
+.catsFloatWrap{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 14px;
+  margin-top: -18px; /* “sobe” e fica no meio do header e conteúdo */
+  position: relative;
+  z-index: 25;
+}
+
+.catsFloatCard{
+  background: var(--white);
+  border-radius: 18px;
+  padding: 10px 10px;
+  box-shadow: 0 14px 28px rgba(16,24,40,0.10);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* chips agora no fundo branco */
+.catChip{
+  border: 1px solid rgba(0,0,0,0.10);
+  background: #f2f3f5;
+  color: #1f2937;
+}
+
+.catChip.active{
+  background: var(--yellow);
+  color: #111;
+  border-color: rgba(0,0,0,0.10);
+}
+
+.productCard {
+  overflow: hidden;      /* corta tudo que tentar sair */
+  min-width: 0;          /* não deixa estourar */
+}
+
+.productTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;   /* se quiser quebrar linha em vez disso, me fala */
+}
+
+.brandLogo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.menuHeaderTop {
+  padding: 12px 12px 6px 12px; /* aumenta o padding do topo */
+  gap: 14px;                    /* aumenta distância entre logo e textos */
+}

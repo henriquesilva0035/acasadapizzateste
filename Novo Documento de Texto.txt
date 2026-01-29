@@ -1,0 +1,47 @@
+bem a ideia que conversamos ontem do projeto foi um projeto delivery igual consume que possa rodar localmente onde os garçons utilizem celular para efetuar pedidos dos clientes com diferencial que nesses mesmo pdv quando tiver co  internet recebemos pedidos do link enviado pelo whatsapp caso internet caia a lanchonete nao para pode utilizar o sistema pra faer pedido  so nao recebe pedido online, e ontem criamos os arquivos ja tem a parte do pdv onde recebe os pedidos fizemos parte das mesas ai o garçom seleciona a mesa coloca nome do cliente e ele adiciona o consumo ai a mesa fica vermelha ocupada e verde livre quando ta ocupada clicando nela abre o detalhe do consumo com dois botaos fechar conta ou adicionar mais produtos ai iniciamos a parte de cadastrar os produtos apra cardapio aplicamos o necessaio no banco de ados e iamos pra o frontend onde criamos un produto teste ele mostrou la  mas ainda nao ia pro cardapio porem tava cadstrando o produto ai com botao de exclir o produto agora falta ser possivel adicionar uma descrição quando cadastrar o produto pra informar os ingredientes que levam o produto e tambem seja possivel editar produto ja cadastrado por exemplo seila mudança de preço sabe, agora vou te falar as pastas e criamos e os arquivos que tem apos voce entender eu irei enviar os arquivos pra voce salvar o codigo pra podermos continuar.
+bem na pasta do projeto projeto-delivery dentro tem pasta api e pasta web
+
+na pasta api tem as pastas:
+node_modules
+prisma > dentro tem pasta migrations, e arquivo dev, e arquivo schema.prisma.
+.env
+.gitignore
+package
+package-lock
+seed.ts- onde ligamos pra aparece as mesas
+serve.ts - onde liga o servidor toda config
+tsconfig
+
+
+na pasta web tem as pastas:
+
+node_modules
+public
+   src > tem pasta assets, e solto na pasta src tem os arquivos: App.tsx
+	Cardapio.tsx
+	DetalhesMesa.tsx
+	index.css mas o conteudo ta apagado
+	main.tsx
+	Mesas.tsx
+	Pdv.tsx
+	PedidoMesa.tsx
+	Produtos.tsx
+
+
+
+. Sobre a "Poluição" no PDV (Tela da Cozinha/Balcão)
+O problema atual é que os pedidos novos se misturam com os antigos e a tela vira uma bagunça eterna.
+
+Ideia A: Fluxo de Status (Kanban Simplificado) Em vez de apenas "Aparecer" e "Sumir", o pedido poderia ter 3 estados visuais:
+
+🔴 Pendente: Pisca ou fica vermelho quando chega (chama atenção).
+
+🟡 Em Preparo: O cozinheiro clica em "Assumir". O card fica amarelo. O garçom sabe que já estão fazendo.
+
+✅ Pronto: O cozinheiro clica em "Pronto". O card some da lista principal, mas vai para uma aba "Histórico do Dia" (caso precisem consultar algo que já foi entregue).
+
+
+
+tava pensando o seguinte no pdv fica meio que fixo sabe ele puxa os numeros de mesas disponivel e ficaria ali ja amostra, entao exemplo mesa 1 tava verde livre ai garçom foi la e atendeu fez 1 pedido e tals no pdv tbm ficaria vermelho e mostraria o codigo de controle de mesa nome do cliente sabe igual ja aparece o nome a hora so iria acrscentar o controle de mesa os pedidos continuam aparecendo, ai quem ficar controlando o pdv pode clicar na mesa e ver os mesmos detalhes que o garçom sabe, meio que a tela do pdv seria dividida, as mesas seria Consumo no local e outra parte seria pedidos online ou divide na horizntal ou vertical o que acha, ai os pedidos online funciona na logica de kanban simplificado pedido fica vermelho é pendente falta aceitar ai clica nele abre o detalhes ver os item nome endereço ai clico nos boteos pr amudar statu por exemplo coloco preprando ai nessa tela teria botao de imprimir a nota sabe ai esse status o cliente em casa iria ver pra acompanhar tbm, o que acha disso e depois acrescentaria um historico pra fazer depois um financeiro onde pegaria todos os pedidos online e consumo no local e daria pra ver o valor sabe isso seria pra depois.
+
+vercel -- prod
