@@ -19,7 +19,7 @@ class BackupService {
   private emailConfig = {
       user: 'henriquesilva0035@gmail.com', // ⚠️ COLOQUE SEU E-MAIL
       pass: 'dsqs fnba rzfg yrni', // ⚠️ COLOQUE SUA SENHA DE APP
-      to: 'henriquenascimento0035@gmail.com' 
+      to: 'operaeatsdev@gmail.com' 
   };
   // ----------------------------------
 
@@ -78,7 +78,7 @@ class BackupService {
         });
 
         const mailOptions = {
-            from: `"Sistema Cachorrão" <${this.emailConfig.user}>`,
+            from: `"Sistema A casa da Pizza" <${this.emailConfig.user}>`,
             to: this.emailConfig.to,
             subject: `📦 Backup DB - ${data.toLocaleString()}`,
             text: 'Segue em anexo o backup automático do banco de dados.',
