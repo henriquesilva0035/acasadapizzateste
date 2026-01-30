@@ -178,7 +178,7 @@ async function openEdit(p: Product) {
       >
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 0.3 }}>O’CACHORRÃO • ADMIN</div>
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 0.3 }}>A’Casa da Pizza • ADMIN</div>
             <div style={{ fontSize: 13, opacity: 0.9 }}>Produtos • Categorias • Disponibilidade</div>
           </div>
 
