@@ -9,6 +9,9 @@
     "dev": "tsx watch server.ts",
     "seed": "tsx seed.ts"
   },
+  "prisma": {
+    "seed": "tsx seed.ts"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
