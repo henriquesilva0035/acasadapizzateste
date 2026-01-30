@@ -227,7 +227,7 @@ export default function Cardapio() {
               <img src="/logo.jpg" alt="OC" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
             <div>
-              <h1 style={{ margin: 0, fontSize: 18, color: THEME.dark, fontWeight: 800 }}>O'Cachorrão</h1>
+              <h1 style={{ margin: 0, fontSize: 18, color: THEME.dark, fontWeight: 800 }}>A'Casa da Pizza</h1>
               <div style={{ fontSize: 12, color: THEME.green, fontWeight: 600 }}>● Aberto Agora</div>
             </div>
           </div>
