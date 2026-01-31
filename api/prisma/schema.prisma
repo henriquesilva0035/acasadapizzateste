@@ -105,6 +105,8 @@ model Product {
   image        String
   category     String
   optionGroups ProductOptionGroup[] // Um produto tem vários grupos (ex: Carne, Molhos)
+  categoryId   Int?     // Opcional por enquanto (para não dar erro nos dados existentes)
+  categoryRel  Category? @relation(fields: [categoryId], references: [id]) // O vínculo real
   available   Boolean @default(true)
 }
 
@@ -112,6 +114,7 @@ model Category {
   id        Int      @id @default(autoincrement())
   name      String   @unique
   createdAt DateTime @default(now())
+  products  Product[]
 }
 
 

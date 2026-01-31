@@ -188,7 +188,54 @@ export default function Cardapio() {
     background: THEME.white,
     color: THEME.gray,
     boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+
   };
+
+
+  // ✅ Lógica Inteligente de Preço para o Cardápio
+  function getDisplayPrice(p: any) {
+    // 1. Se tiver Promoção ativa, ela ganha de tudo
+    if (p.promoPrice && p.promoPrice > 0) {
+      return { 
+        label: `R$ ${Number(p.promoPrice).toFixed(2)}`, 
+        isPromo: true, 
+        original: p.price 
+      };
+    }
+
+    const base = Number(p.price || 0);
+
+    // 2. Se o produto tem preço fixo (maior que 0), usa ele
+    if (base > 0) {
+      return { label: `R$ ${base.toFixed(2)}`, isPromo: false };
+    }
+
+    // 3. Se for R$ 0.00, busca o menor preço dentro dos grupos de opções
+    const optionPrices: number[] = [];
+    if (p.optionGroups && Array.isArray(p.optionGroups)) {
+      for (const g of p.optionGroups) {
+        if (g.available === false) continue;
+        for (const it of g.items || []) {
+           const pr = Number(it.price || 0);
+           if (pr > 0) optionPrices.push(pr);
+        }
+      }
+    }
+
+    // Achou algum preço nos opcionais? Pega o menor (A partir de...)
+    if (optionPrices.length > 0) {
+      const min = Math.min(...optionPrices);
+      return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
+    }
+
+    // 4. Se não achou nada, mostra zero mesmo
+    return { label: 'R$ 0.00', isPromo: false };
+  }
+
+
+
+
+
 
   return (
     <div
@@ -374,8 +421,8 @@ export default function Cardapio() {
           </div>
         ) : (
           filteredProducts.map((p) => {
-            const promoOn = Boolean(p.promoPrice && p.promoPrice > 0);
-            const finalPrice = promoOn ? p.promoPrice : p.price;
+            // ✅ Chama a função nova para decidir o preço
+            const priceInfo = getDisplayPrice(p);
 
             return (
               <div
@@ -397,7 +444,9 @@ export default function Cardapio() {
                 onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
               >
                 <div style={{ flex: 1 }}>
-                  <strong style={{ display: "block", fontSize: 16, color: THEME.dark, marginBottom: 4 }}>{p.name}</strong>
+                  <strong style={{ display: "block", fontSize: 16, color: THEME.dark, marginBottom: 4 }}>
+                    {p.name}
+                  </strong>
 
                   <div
                     style={{
@@ -413,16 +462,27 @@ export default function Cardapio() {
                     {p.description || "Sem descrição"}
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ color: promoOn ? THEME.green : THEME.dark, fontWeight: 900, fontSize: 16 }}>
-                      R$ {Number(finalPrice || 0).toFixed(2)}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    {/* PREÇO INTELIGENTE (Mostra valor ou "A partir de") */}
+                    <span
+                      style={{
+                        color: priceInfo.isPromo ? THEME.green : THEME.dark,
+                        fontWeight: 900,
+                        fontSize: 16,
+                      }}
+                    >
+                      {priceInfo.label}
                     </span>
-                    {promoOn && (
+
+                    {/* PREÇO ORIGINAL RISCADO (SÓ SE FOR PROMO) */}
+                    {priceInfo.isPromo && priceInfo.original && priceInfo.original > 0 && (
                       <span style={{ textDecoration: "line-through", color: "#bbb", fontSize: 12 }}>
-                        R$ {Number(p.price || 0).toFixed(2)}
+                        R$ {Number(priceInfo.original).toFixed(2)}
                       </span>
                     )}
-                    {promoOn && (
+
+                    {/* ETIQUETA DE PROMOÇÃO */}
+                    {priceInfo.isPromo && (
                       <span
                         style={{
                           marginLeft: 6,
@@ -464,6 +524,7 @@ export default function Cardapio() {
           })
         )}
       </div>
+      
 
       {/* BOTÕES FLUTUANTES (SACOLA + RASTREIO) */}
       <div

@@ -78,7 +78,7 @@ class BackupService {
         });
 
         const mailOptions = {
-            from: `"Sistema A casa da Pizza" <${this.emailConfig.user}>`,
+            from: `"Sistema Acasa da Pizza" <${this.emailConfig.user}>`,
             to: this.emailConfig.to,
             subject: `📦 Backup DB - ${data.toLocaleString()}`,
             text: 'Segue em anexo o backup automático do banco de dados.',

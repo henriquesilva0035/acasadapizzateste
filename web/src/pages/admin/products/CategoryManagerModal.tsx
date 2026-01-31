@@ -13,6 +13,7 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
   const [cats, setCats] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Carrega a lista
   async function load() {
     setLoading(true);
     try {
@@ -31,6 +32,7 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
     load();
   }, [open]);
 
+  // FUNÇÃO DE APAGAR (Já existia)
   async function removeCat(cat: Category) {
     if (!confirm(`Apagar categoria "${cat.name}"?`)) return;
 
@@ -40,6 +42,28 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
       onChanged?.();
     } catch (e: any) {
       alert(e?.message || "Não foi possível apagar (talvez esteja em uso)");
+    }
+  }
+
+  // ✅ NOVA FUNÇÃO: EDITAR CATEGORIA
+  async function handleEdit(cat: Category) {
+    // Abre um prompt simples do navegador para pedir o novo nome
+    const novoNome = prompt("Renomear categoria para:", cat.name);
+
+    // Se cancelou ou deixou vazio ou igual, não faz nada
+    if (!novoNome || !novoNome.trim() || novoNome === cat.name) return;
+
+    try {
+      await apiFetch(`/categories/${cat.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: novoNome }),
+      });
+
+      alert("Categoria renomeada com sucesso! Os produtos foram atualizados.");
+      load(); // Recarrega a lista
+      onChanged?.(); // Avisa a tela pai para atualizar também
+    } catch (e: any) {
+      alert(e?.message || "Erro ao renomear categoria");
     }
   }
 
@@ -74,7 +98,7 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
           </button>
         </div>
 
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, maxHeight: '60vh', overflowY: 'auto' }}>
           {loading ? (
             <p>Carregando...</p>
           ) : cats.length === 0 ? (
@@ -93,22 +117,43 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
                     padding: 10,
                   }}
                 >
-                  <strong>{c.name}</strong>
+                  <strong style={{ flex: 1 }}>{c.name}</strong>
 
-                  <button
-                    onClick={() => removeCat(c)}
-                    style={{
-                      border: "1px solid #d63031",
-                      background: "white",
-                      color: "#d63031",
-                      borderRadius: 10,
-                      padding: "8px 10px",
-                      cursor: "pointer",
-                      fontWeight: 900,
-                    }}
-                  >
-                    🗑 Apagar
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {/* BOTÃO EDITAR */}
+                    <button
+                      onClick={() => handleEdit(c)}
+                      style={{
+                        border: "1px solid #0984e3",
+                        background: "white",
+                        color: "#0984e3",
+                        borderRadius: 10,
+                        padding: "8px 10px",
+                        cursor: "pointer",
+                        fontWeight: 900,
+                      }}
+                      title="Renomear"
+                    >
+                      ✏️ Editar
+                    </button>
+
+                    {/* BOTÃO APAGAR */}
+                    <button
+                      onClick={() => removeCat(c)}
+                      style={{
+                        border: "1px solid #d63031",
+                        background: "white",
+                        color: "#d63031",
+                        borderRadius: 10,
+                        padding: "8px 10px",
+                        cursor: "pointer",
+                        fontWeight: 900,
+                      }}
+                      title="Apagar"
+                    >
+                      🗑 Apagar
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -117,7 +162,7 @@ export default function CategoryManagerModal({ open, onClose, onChanged }: Props
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
           <button onClick={load} style={{ borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
-            Recarregar
+            Recarregar Lista
           </button>
         </div>
       </div>

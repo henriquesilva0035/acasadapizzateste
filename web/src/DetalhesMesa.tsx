@@ -132,22 +132,49 @@ export default function DetalhesMesa() {
             <button onClick={reimprimirPedidoCompleto} style={{ background: '#2d3436', color:'white', border:'none', borderRadius:'5px', padding:'5px 10px', cursor:'pointer' }}>🖨️ Reenviar Cozinha</button>
         </div>
         
-        {mesa.orders.map((order: any) => (
-            <div key={order.idString} style={{ borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
-                {order.items.map((item: any) => (
-                    <div key={item.idString} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                        <div>
-                            <strong>{item.quantity}x {item.product}</strong>
-                            <div style={{ fontSize: '12px', color: '#666' }}>{item.additions} {item.flavors} {item.observation}</div>
-                        </div>
-                        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                            <span>R$ {(item.price * item.quantity).toFixed(2)}</span>
-                            <button onClick={() => excluirItem(order.idString, item.idString)} style={{ border:'none', background:'transparent', cursor:'pointer' }}>🗑️</button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        ))}
+       {mesa.orders.map((order: any) => {
+            // CORREÇÃO: Se o pedido ficou sem itens (vazio), não renderiza nada (nem a linha)
+            if (!order.items || order.items.length === 0) return null;
+
+            return (
+                <div key={order.idString} style={{ borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
+                    {order.items.map((item: any) => {
+                        const nomeProduto = item.name || item.product || 'Produto sem nome';
+
+                        return (
+                            <div key={item.idString} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', alignItems: 'flex-start' }}>
+                                
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#2d3436', marginBottom: '4px' }}>
+                                        {item.quantity}x {nomeProduto}
+                                    </div>
+
+                                    <div style={{ fontSize: '13px', color: '#636e72', paddingLeft: '0px' }}>
+                                        {item.flavors ? <div style={{ marginBottom:'2px' }}>🍕 <b>Sabores:</b> {item.flavors}</div> : null}
+                                        {item.border ? <div style={{ marginBottom:'2px' }}>🧀 <b>Borda:</b> {item.border}</div> : null}
+                                        {item.additions ? <div style={{ marginBottom:'2px' }}>➕ <b>Adicionais:</b> {item.additions}</div> : null}
+                                        {item.extras ? <div style={{ marginBottom:'2px' }}>✨ <b>Extras:</b> {item.extras}</div> : null}
+                                        {item.observation ? <div style={{ color: '#d63031', marginTop: '4px' }}>⚠️ <b>Obs:</b> {item.observation}</div> : null}
+                                    </div>
+                                </div>
+
+                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginLeft: '10px' }}>
+                                    <span style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                        R$ {(item.price * item.quantity).toFixed(2)}
+                                    </span>
+                                    <button 
+                                        onClick={() => excluirItem(order.idString, item.idString)} 
+                                        style={{ border:'none', background:'transparent', cursor:'pointer', fontSize: '18px' }}
+                                    >
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            )
+        })}
 
         <div style={{ marginTop: '20px', fontSize: '24px', fontWeight: 'bold', textAlign: 'right', color: '#27ae60' }}>
             Total: R$ {totalGeral.toFixed(2)}

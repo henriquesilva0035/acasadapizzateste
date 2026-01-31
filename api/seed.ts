@@ -3,7 +3,7 @@ const prisma = new PrismaClient()
 
 async function main() {
   // 1. Cria ou Reseta as Mesas
-  for (let i = 11; i <= 20; i++) {
+  for (let i = 1; i <= 21; i++) {
     await prisma.table.upsert({
       where: { id: i },
       update: {},

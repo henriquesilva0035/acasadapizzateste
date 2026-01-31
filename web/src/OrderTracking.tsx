@@ -50,7 +50,7 @@ export default function OrderTracking() {
   const statusLabel = STEPS[currentStepIndex]?.label || "DESCONHECIDO";
 
   // Telefone da loja para o botão "Falar com restaurante"
-  const WHATSAPP_LOJA = "5581994601157"; 
+  const WHATSAPP_LOJA = "5551990038803"; 
   // Adicione isso antes do return do componente
 console.log("STATUS ATUAL DO PEDIDO:", order.status);
 

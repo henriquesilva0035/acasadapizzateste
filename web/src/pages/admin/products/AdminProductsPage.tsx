@@ -183,6 +183,26 @@ async function openEdit(p: Product) {
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  
+                   <button
+                    onClick={openCreate}
+                    style={{
+                      padding: "10px 14px",
+                      background: THEME.yellow,
+                      color: THEME.dark,
+                      border: "none",
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      fontWeight: 900,
+                      boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    ➕ Novo Produto
+                  </button>
+                  
+                  
+                  
+                  
                   <button
                     onClick={() => setCategoryModalOpen(true)}
                     style={{
@@ -199,6 +219,8 @@ async function openEdit(p: Product) {
                     ➕ Nova Categoria
                   </button>
 
+
+
                   <button
                     onClick={() => setManageCatsOpen(true)}
                     style={{
@@ -212,42 +234,11 @@ async function openEdit(p: Product) {
                       boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
                     }}
                   >
-                    📂 Gerenciar
+                    📂 Gerenciar Categorias
                   </button>
 
-                  <button
-                    onClick={openCreate}
-                    style={{
-                      padding: "10px 14px",
-                      background: THEME.yellow,
-                      color: THEME.dark,
-                      border: "none",
-                      borderRadius: 10,
-                      cursor: "pointer",
-                      fontWeight: 900,
-                      boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
-                    }}
-                  >
-                    ➕ Novo Produto
-                  </button>
 
-                  <button
-              onClick={migrateCategories}
-              style={{
-                padding: "10px 14px",
-                background: "white",
-                color: THEME.dark,
-                border: `1px solid ${THEME.border}`,
-                borderRadius: 10,
-                cursor: "pointer",
-                fontWeight: 900,
-                boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
-              }}
-            >
-              🔁 Migrar Categorias
-            </button>
-
-
+                    
 
 
                 </div>

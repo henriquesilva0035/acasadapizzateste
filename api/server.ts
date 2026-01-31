@@ -193,21 +193,36 @@ function cartMatchesTrigger(promo: any, computedItems: any[]) {
   return false
 }
 
-// ✅ LISTA (pra tela admin)
+
+
+
+// 2. ATUALIZE A ROTA GET /products PARA TRAZER A CATEGORIA CERTA
+// Procure a rota app.get('/products'...) e mude o include:
+
 app.get('/products', async (request: any, reply: any) => {
   try {
     const products = await prisma.product.findMany({
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      // Ordena pela relação agora
+      orderBy: [{ categoryRel: { name: 'asc' } }, { name: 'asc' }],
       include: {
+        categoryRel: true, // <--- TRAZ O OBJETO CATEGORIA
         optionGroups: {
           include: { items: true },
           orderBy: { id: 'asc' },
         },
       },
     })
-    return reply.send(products)
+    
+    // Mapeia para o frontend não quebrar (mantém o campo .category preenchido)
+    const formatted = products.map((p: any) => ({
+      ...p,
+      // Se tiver relação, usa o nome dela. Se não, usa o texto antigo.
+      category: p.categoryRel ? p.categoryRel.name : p.category
+    }))
+
+    return reply.send(formatted)
   } catch (err: any) {
-    return reply.status(500).send({ error: err?.message || 'Erro ao listar produtos' })
+    return reply.status(500).send({ error: err?.message })
   }
 })
 
@@ -301,9 +316,18 @@ app.delete('/neighborhoods/:id', async (req: any, reply: any) => {
 
 
 app.post("/products", async (request: any, reply: any) => {
-  const data = request.body
+  const data = request.body;
 
   try {
+    // 1. Tenta descobrir o ID da categoria baseada no nome que veio do frontend
+    let catId = null;
+    if (data.category) {
+      const cat = await prisma.category.findUnique({
+        where: { name: data.category.toUpperCase().trim() }
+      });
+      if (cat) catId = cat.id;
+    }
+
     const created = await prisma.product.create({
       data: {
         name: data.name,
@@ -314,7 +338,11 @@ app.post("/products", async (request: any, reply: any) => {
           : null,
         promoDays: data.promoDays ?? "",
         image: data.image ?? "🍔",
-        category: data.category ?? "OUTROS",
+        
+        // ✅ AQUI ESTÁ A MÁGICA:
+        category: data.category ?? "OUTROS", // Mantém o texto (por compatibilidade)
+        categoryId: catId,                   // Salva o ID (o vínculo forte)
+
         available: data.available ?? true,
 
         optionGroups: {
@@ -322,10 +350,7 @@ app.post("/products", async (request: any, reply: any) => {
             title: g.title,
             min: Number(g.min || 0),
             max: Number(g.max || 1),
-
-            // ✅ chargeRule
             chargeMode: String(g.chargeRule ?? g.chargeMode ?? "SUM").toUpperCase(),
-
             items: {
               create: (g.items || []).map((it: any) => ({
                 name: it.name,
@@ -339,23 +364,31 @@ app.post("/products", async (request: any, reply: any) => {
         },
       },
       include: { optionGroups: { include: { items: true } } },
-    })
+    });
 
-    io?.emit("products:updated")
-    return reply.send(created)
+    io?.emit("products:updated");
+    return reply.send(created);
   } catch (err: any) {
-    console.error("POST /products ERROR =>", err)
-    return reply.status(400).send({ error: err?.message || "Erro ao criar produto" })
+    console.error("POST /products ERROR =>", err);
+    return reply.status(400).send({ error: err?.message || "Erro ao criar produto" });
   }
-})
-
+});
 
 app.put("/products/:id", async (request: any, reply: any) => {
   const productId = Number(request.params.id)
   const data = request.body
 
   try {
-    // remove grupos antigos (e itens)
+    // 1. Tenta descobrir o ID da categoria nova (igual fizemos no POST)
+    let catId = null;
+    if (data.category) {
+      const cat = await prisma.category.findUnique({
+        where: { name: data.category.toUpperCase().trim() }
+      });
+      if (cat) catId = cat.id;
+    }
+
+    // 2. Remove grupos antigos (Lógica existente)
     const oldGroups = await prisma.productOptionGroup.findMany({
       where: { productId },
       select: { id: true },
@@ -369,6 +402,7 @@ app.put("/products/:id", async (request: any, reply: any) => {
       await prisma.productOptionGroup.deleteMany({ where: { productId } })
     }
 
+    // 3. Atualiza o produto com o novo categoryId
     const updated = await prisma.product.update({
       where: { id: productId },
       data: {
@@ -379,21 +413,19 @@ app.put("/products/:id", async (request: any, reply: any) => {
           ? Number(data.promoPrice)
           : null,
         promoDays: data.promoDays ?? "",
-        category: data.category ?? "OUTROS",
         image: data.image ?? "🍔",
         available: data.available ?? true,
+
+        // ✅ ATUALIZAÇÃO DUPLA (Texto + ID)
+        category: data.category ?? "OUTROS",
+        categoryId: catId,
 
         optionGroups: {
           create: (data.optionGroups || []).map((g: any) => ({
             title: g.title,
             min: Number(g.min || 0),
             max: Number(g.max || 1),
-
-            // ✅ AQUI: schema usa chargeRule
             chargeMode: String(g.chargeRule ?? g.chargeMode ?? "SUM").toUpperCase(),
-
-            // ⚠️ NÃO manda available aqui pq seu schema não tem available no group
-
             items: {
               create: (g.items || []).map((it: any) => ({
                 name: it.name,
@@ -533,6 +565,56 @@ app.delete("/categories/:id", async (req: any, reply: any) => {
     return reply.status(500).send({ error: err?.message || "Erro ao apagar categoria" });
   }
 });
+
+
+// ARQUIVO: server.ts
+
+// ✅ ROTA DE EDITAR CATEGORIA (Atualiza nome + produtos)
+app.put("/categories/:id", async (req: any, reply: any) => {
+  const id = Number(req.params.id);
+  const { name } = req.body;
+
+  if (!Number.isFinite(id)) return reply.status(400).send({ error: "ID inválido" });
+  if (!name || !name.trim()) return reply.status(400).send({ error: "Nome é obrigatório" });
+
+  const newName = String(name).toUpperCase().trim();
+
+  try {
+    // 1. Pega o nome antigo antes de mudar
+    const oldCat = await prisma.category.findUnique({ where: { id } });
+    if (!oldCat) return reply.status(404).send({ error: "Categoria não encontrada" });
+
+    // 2. Atualiza a tabela de Categorias
+    const updatedCat = await prisma.category.update({
+      where: { id },
+      data: { name: newName },
+    });
+
+    // 3. SE O NOME MUDOU, atualiza todos os produtos que usavam o nome velho
+    if (oldCat.name !== newName) {
+      const updateResult = await prisma.product.updateMany({
+        where: { category: oldCat.name },
+        data: { category: newName },
+      });
+      console.log(`Categoria renomeada. ${updateResult.count} produtos atualizados.`);
+    }
+
+    // 4. Avisa os apps conectados
+    io?.emit("categories:updated");
+    io?.emit("products:updated");
+
+    return reply.send(updatedCat);
+  } catch (err: any) {
+    if (String(err?.code) === "P2002") {
+      return reply.status(409).send({ error: "Já existe uma categoria com esse nome!" });
+    }
+    return reply.status(500).send({ error: err?.message || "Erro ao editar categoria" });
+  }
+});
+
+
+
+
 
 
 
@@ -1737,35 +1819,11 @@ app.post('/orders', async (request: any, reply: any) => {
     include: { items: true, table: true },
   })
 
-  // --- histórico de itens já existentes na mesa (pra impressão) ---
-  let historicoProdutos: string[] = []
-  if (origin !== 'CLOUD' && tableId) {
-    const pedidosAnteriores = await prisma.order.findMany({
-      where: {
-            tableId: Number(tableId),
-            tableSessionCode: order.tableSessionCode, // ou mesa.currentSessionCode
-            status: { notIn: ['CLOSED', 'CANCELED'] },
-            idString: { not: order.idString },
-          },
-
-      include: { items: true },
-    })
-
-    pedidosAnteriores.forEach((p: any) => {
-      p.items.forEach((i: any) => {
-        historicoProdutos.push(`${i.quantity}x ${i.product}`)
-      })
-    })
-  }
-
   try {
-    await printerService.printOrder({
-      ...(order as any),
-      existingItems: historicoProdutos,
-    })
-  } catch (e) {
-    console.error('Erro na impressão:', e)
-  }
+  await printerService.printOrder(order as any) // ✅ só itens novos
+} catch (e) {
+  console.error('Erro na impressão:', e)
+}
 
   io.emit('new-order', order)
   return order
@@ -1776,18 +1834,24 @@ app.post('/tables/:id/print-kitchen', async (req: any, reply: any) => {
 
   const table = await prisma.table.findUnique({
     where: { id: Number(id) },
-    include: {
-      orders: {
-        where: { status: { notIn: ['CLOSED', 'CANCELED'] } },
-        include: { items: true },
-      },
-    },
   })
-
   if (!table) return reply.status(404).send({ error: 'Mesa não encontrada' })
 
-  const items = (table.orders || []).flatMap((o: any) => o.items || [])
-  const total = items.reduce((acc: number, it: any) => acc + Number(it.price) * Number(it.quantity), 0)
+  const orders = await prisma.order.findMany({
+    where: {
+      tableId: Number(id),
+      status: { notIn: ['CLOSED', 'CANCELED'] },
+      tableSessionId: table.currentSessionId ?? undefined, // ✅ trava na sessão atual
+    },
+    include: { items: true },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  const items = orders.flatMap((o: any) => o.items || [])
+  const total = items.reduce(
+    (acc: number, it: any) => acc + Number(it.price) * Number(it.quantity),
+    0
+  )
 
   const orderLike = {
     idString: `M${String(table.id).padStart(3, '0')}`,

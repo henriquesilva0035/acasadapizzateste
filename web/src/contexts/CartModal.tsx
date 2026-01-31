@@ -104,7 +104,7 @@ export default function CartModal({ open, onClose }: Props) {
   const finalTotal = total + taxaEntrega;
 
   function sendToWhatsApp(orderId: string, addressFull: string, payMethod: string) {
-    const LOJA_PHONE = "5581994601157"; // ⚠️ SEU NÚMERO
+    const LOJA_PHONE = "5551990038803"; // ⚠️ SEU NÚMERO
     let msg = `*Novo Pedido #${orderId.slice(0, 4)}* 🚀\n`;
     msg += `*Cliente:* ${customerName}\n\n`;
 
