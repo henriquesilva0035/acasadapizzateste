@@ -88,6 +88,42 @@ export default function CartModal({ open, onClose }: Props) {
 }, []);
 
 
+  function moneyToNumber(v: any) {
+  if (v == null) return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const s = String(v).trim();
+  if (!s) return 0;
+
+  // aceita "10", "10.5", "10,50", "R$ 10,50"
+  const cleaned = s.replace(/[^0-9,.-]/g, "");
+  const hasComma = cleaned.includes(",");
+  const normalized = hasComma
+    ? cleaned.replace(/\./g, "").replace(",", ".")
+    : cleaned;
+
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isProductPromoActive(p: any) {
+  const promo = moneyToNumber(p?.promoPrice);
+  if (!promo || promo <= 0) return false;
+
+  const daysStr = String(p?.promoDays ?? "").trim();
+  if (!daysStr) return true;
+
+  const allowed = daysStr
+    .split(",")
+    .map((x) => Number(String(x).trim()))
+    .filter((n) => Number.isFinite(n));
+
+  const today = new Date().getDay(); // 0=domingo ... 6=sabado
+  return allowed.includes(today);
+}
+
+
+
+
 
 
 
@@ -209,17 +245,18 @@ function getAdjustedOptionPrice(optionItem: any, prod: any, cartLines?: any[]) {
 }
 
 
-
-
-
-
-
 function computeUnitFromProductAndOptions(cartItem: any) {
-  const prod = getProductById(Number(cartItem.productId));
-  if (!prod) return Number(cartItem.unitPrice ?? 0);
+  // ✅ SEMPRE prefira o valor salvo no carrinho (já veio com promo aplicada no modal)
+  const saved = Number(cartItem.unitPrice ?? 0);
+  if (saved > 0) return saved;
 
-  // base do produto (se for 0, vai depender das opções)
-  const base = Number(prod.price || 0);
+  // fallback só pra itens antigos que não tinham unitPrice
+  const prod = getProductById(Number(cartItem.productId));
+  if (!prod) return 0;
+
+  const base = isProductPromoActive(prod)
+    ? moneyToNumber(prod.promoPrice)
+    : Number(prod.price || 0);
 
   const selectedIds = (cartItem.optionIds || []).map(Number);
   const selectedSet = new Set(selectedIds);
@@ -232,11 +269,9 @@ function computeUnitFromProductAndOptions(cartItem: any) {
     const selectedInGroup = (g.items || []).filter((it: any) => selectedSet.has(Number(it.id)));
     if (!selectedInGroup.length) continue;
 
-    const prices = selectedInGroup.map((it: any) =>
-  getAdjustedOptionPrice(it, prod, items));
+    const prices = selectedInGroup.map((it: any) => getAdjustedOptionPrice(it, prod, items));
 
     const mode = String(g.chargeMode || "SUM").toUpperCase();
-    
 
     let groupAdd = 0;
     if (mode === "MAX") groupAdd = Math.max(...prices);
@@ -248,6 +283,7 @@ function computeUnitFromProductAndOptions(cartItem: any) {
 
   return Number((base + addons).toFixed(2));
 }
+
 
 
 
