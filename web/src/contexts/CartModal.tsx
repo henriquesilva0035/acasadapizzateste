@@ -180,6 +180,15 @@ function promoTargetsItem(promo: any, cartItem: any) {
   const prod = getProductById(Number(cartItem.productId));
   if (!prod) return false;
 
+  // ❌ nunca aplicar recompensa no produto gatilho
+  const triggerIds = csvToIds(promo.triggerProductIds);
+  if (triggerIds.includes(Number(prod.id))) return false;
+
+  if (promo.triggerCategory && promo.rewardCategory && promo.triggerCategory === promo.rewardCategory) {
+    // evita "categoria igual" aplicar no gatilho
+    if (prod.category === promo.triggerCategory) return false;
+  }
+
   const rewardIds = csvToIds(promo.rewardProductIds);
 
   const idMatch = rewardIds.length > 0 ? rewardIds.includes(Number(prod.id)) : false;
@@ -188,42 +197,79 @@ function promoTargetsItem(promo: any, cartItem: any) {
   return idMatch || catMatch;
 }
 
+
 // ✅ calcula preço exibido no carrinho (aplica 1 grátis)
-function computeCartDisplay(items: any[]) {
-  // copia para não mutar
+
+  function computeCartDisplay(items: any[]) {
   const lines = items.map((it) => ({ ...it }));
 
-  // mapa: preço base do item (o que já está no carrinho)
   const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
 
-  // começa com valores base
+  // subtotal sem promo (pra calcular economia)
+  let baseSubtotal = 0;
+
   for (const it of lines) {
-    it.__displayUnit = baseUnit(it);
-    it.__displayTotal = Number((it.__displayUnit * Number(it.qty || 1)).toFixed(2));
+    const unit = baseUnit(it);
+    const tot = Number((unit * Number(it.qty || 1)).toFixed(2));
+
+    it.__baseUnit = unit;
+    it.__baseTotal = tot;
+
+    it.__displayUnit = unit;
+    it.__displayTotal = tot;
+
     it.__promoLabel = null;
     it.__promoFreeQty = 0;
+
+    baseSubtotal += tot;
   }
 
-  // aplica promoções
+  const promoNotes: string[] = [];
+
   for (const pr of (promos || [])) {
     if (!pr?.active) continue;
     if (!cartHasTrigger(pr, lines)) continue;
 
-    // DISCOUNT_PERCENT / FIXED_PRICE (opcional no carrinho; por enquanto vamos focar no grátis)
-    if (pr.rewardType === "DISCOUNT_PERCENT" || pr.rewardType === "FIXED_PRICE") {
-      // depois a gente deixa igual ao cardápio, se quiser
+    // alvos
+    const targets = lines.filter((it) => promoTargetsItem(pr, it));
+    if (targets.length === 0) continue;
+
+    // ✅ DISCOUNT_PERCENT
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct <= 0) continue;
+
+      for (const it of targets) {
+        const newUnit = Number((it.__baseUnit * (100 - pct) / 100).toFixed(2));
+        it.__displayUnit = newUnit;
+        it.__displayTotal = Number((newUnit * Number(it.qty || 1)).toFixed(2));
+        it.__promoLabel = `🔥 ${pct}% OFF (${pr.name})`;
+      }
+
+      promoNotes.push(`${pr.name} (${pct}% OFF)`);
       continue;
     }
 
-    // ITEM_FREE: controla 1 grátis no carrinho
+    // ✅ FIXED_PRICE
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp <= 0) continue;
+
+      for (const it of targets) {
+        it.__displayUnit = Number(fp.toFixed(2));
+        it.__displayTotal = Number((it.__displayUnit * Number(it.qty || 1)).toFixed(2));
+        it.__promoLabel = `🔥 Preço fixo ${formatBRL(fp)} (${pr.name})`;
+      }
+
+      promoNotes.push(`${pr.name} (fixo)`);
+      continue;
+    }
+
+    // ✅ ITEM_FREE (1 grátis)
     if (pr.rewardType === "ITEM_FREE") {
       let remainingFree = Number(pr.maxRewardQty || 1);
 
-      // pega itens que são reward
-      const rewardLines = lines.filter((it) => promoTargetsItem(pr, it));
-
-      // aplica grátis nos mais baratos primeiro
-      rewardLines.sort((a, b) => baseUnit(a) - baseUnit(b));
+      const rewardLines = [...targets].sort((a, b) => a.__baseUnit - b.__baseUnit);
 
       for (const it of rewardLines) {
         if (remainingFree <= 0) break;
@@ -231,27 +277,42 @@ function computeCartDisplay(items: any[]) {
         const q = Number(it.qty || 1);
         const freeQty = Math.min(q, remainingFree);
 
-        // se tiver pelo menos 1 grátis, muda exibição para "grátis"
-        // (simplificado: se qty==1 vira 0; se qty>1, a gente mostra selo e ajusta total)
         if (freeQty === q) {
           it.__displayUnit = 0;
           it.__displayTotal = 0;
         } else {
-          // parte grátis, parte paga: total = (q-freeQty)*preço
-          it.__displayUnit = baseUnit(it); // mantém unit normal
-          it.__displayTotal = Number((baseUnit(it) * (q - freeQty)).toFixed(2));
+          it.__displayUnit = it.__baseUnit;
+          it.__displayTotal = Number((it.__baseUnit * (q - freeQty)).toFixed(2));
         }
 
         it.__promoFreeQty = freeQty;
-        it.__promoLabel = `🎁 ${freeQty} grátis (promoção)`;
+        it.__promoLabel = `🎁 ${freeQty} grátis (${pr.name})`;
+
         remainingFree -= freeQty;
       }
+
+      promoNotes.push(`${pr.name} (brinde)`);
+      continue;
     }
+
+    // OPTION_FREE: deixamos pro próximo passo (borda grátis)
   }
 
   const subtotal = lines.reduce((acc, it) => acc + Number(it.__displayTotal || 0), 0);
-  return { lines, subtotal: Number(subtotal.toFixed(2)) };
+  const promoSubtotal = Number(subtotal.toFixed(2));
+  const economy = Number((baseSubtotal - promoSubtotal).toFixed(2));
+
+  return {
+    lines,
+    subtotal: promoSubtotal,
+    baseSubtotal: Number(baseSubtotal.toFixed(2)),
+    economy: economy > 0 ? economy : 0,
+    promoNotes,
+  };
 }
+
+
+
 
 
   async function handleFinish() {
@@ -420,6 +481,27 @@ function computeCartDisplay(items: any[]) {
                         </div>
                       )}
 
+                      {it.__promoLabel && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 12,
+                              fontWeight: 900,
+                              color: THEME.primary,
+                              background: "rgba(0,184,148,0.10)",
+                              border: "1px solid rgba(0,184,148,0.18)",
+                              padding: "6px 10px",
+                              borderRadius: 10,
+                              width: "fit-content",
+                              maxWidth: "100%",
+                            }}
+                          >
+                            {it.__promoLabel}
+                          </div>
+                        )}
+
+
+
                       {/* Botões */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${THEME.bg}`, paddingTop: 12 }}>
                         <button
@@ -554,6 +636,22 @@ function computeCartDisplay(items: any[]) {
             <span>Subtotal</span>
             <span>{formatBRL(cartView.subtotal)}</span>
           </div>
+
+            {cartView.economy > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 13, color: THEME.primary, fontWeight: 900 }}>
+                <span>Promoções</span>
+                <span>- {formatBRL(cartView.economy)}</span>
+              </div>
+            )}
+            {cartView.promoNotes?.length > 0 && (
+              <div style={{ marginBottom: 10, fontSize: 12, color: THEME.textGray }}>
+                {cartView.promoNotes.slice(0, 2).map((t: string, i: number) => (
+                  <div key={i}>• {t}</div>
+                ))}
+              </div>
+            )}
+
+
 
           {step === "DETAILS" && deliveryMode === "DELIVERY" && (
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 13, color: THEME.danger }}>
