@@ -193,11 +193,19 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
   // (opcional) se você usa triggerCategory/triggerProductIds para “marcar” onde a promo de opção aparece
   function promoAppliesToProduct(pr: any, prod: Product) {
-    const triggerIds = csvToIds(pr.triggerProductIds);
-    const byId = triggerIds.length ? triggerIds.includes(Number(prod.id)) : false;
-    const byCat = pr.triggerCategory ? String(pr.triggerCategory) === String(prod.category) : false;
-    return byId || byCat;
+  const triggerIds = csvToIds(pr.triggerProductIds);
+
+  if (triggerIds.length > 0) {
+    return triggerIds.includes(Number(prod.id));
   }
+
+  if (pr.triggerCategory) {
+    return String(pr.triggerCategory) === String(prod.category);
+  }
+
+  return false;
+}
+
 
   function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
     const original = Number(optionItem.price || 0);
@@ -241,24 +249,26 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
    * - O modal precisa aplicar também (pra salvar unitPrice correto)
    * =========================================================
    */
+  
 
   function cartHasTrigger(promo: any, cartItems: any[]) {
-    const triggerIds = csvToIds(promo.triggerProductIds);
+  const triggerIds = csvToIds(promo.triggerProductIds);
 
-    if (triggerIds.length > 0) {
-      return cartItems.some((it: any) => triggerIds.includes(Number(it.productId)));
-    }
-
-    if (promo.triggerCategory) {
-      return cartItems.some((it: any) => {
-        const pid = Number(it.productId);
-        const cat = prodMeta?.[pid]?.category ?? null;
-        return cat != null && String(cat) === String(promo.triggerCategory);
-      });
-    }
-
-    return false;
+  // ✅ PRIORIDADE TOTAL para IDs
+  if (triggerIds.length > 0) {
+    return cartItems.some(it => triggerIds.includes(Number(it.productId)));
   }
+
+  // só usa categoria se NÃO houver IDs
+  if (promo.triggerCategory) {
+    return cartItems.some(it =>
+      String(it.productCategory) === String(promo.triggerCategory)
+    );
+  }
+
+  return false;
+}
+
 
   function productIsReward(promo: any, prod: Product) {
     const rewardIds = csvToIds(promo.rewardProductIds);
@@ -270,13 +280,21 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   }
 
   function productIsTrigger(promo: any, prod: Product) {
-    const triggerIds = csvToIds(promo.triggerProductIds);
-    if (triggerIds.length > 0 && triggerIds.includes(Number(prod.id))) return true;
+  const triggerIds = csvToIds(promo.triggerProductIds);
 
-    if (promo.triggerCategory && String(prod.category) === String(promo.triggerCategory)) return true;
-
-    return false;
+  // ✅ se tem ID, IGNORA categoria completamente
+  if (triggerIds.length > 0) {
+    return triggerIds.includes(Number(prod.id));
   }
+
+  // só usa categoria se não tiver IDs
+  if (promo.triggerCategory) {
+    return String(prod.category) === String(promo.triggerCategory);
+  }
+
+  return false;
+}
+
 
   function applyDynamicProductPromos(prod: Product, base: number, cartItems: any[]) {
     let best = base;
@@ -393,6 +411,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
         name: product.name,
         unitPrice: calc.unit,
         notes: obs,
+        productCategory: product.category ?? null,
         optionSummary: calc.optionSummary,
         optionIds: Array.from(selected),
       },

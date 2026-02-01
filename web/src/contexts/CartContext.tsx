@@ -5,6 +5,9 @@ export type CartItem = {
   productId: number;
   name: string;
   unitPrice: number;
+  appliedPromoId?: number | null;     // ✅ novo
+  appliedPromoLabel?: string | null;
+  productCategory?: string | null;
   qty: number;
   notes?: string;
   optionSummary?: string; 

@@ -296,6 +296,11 @@ function cartHasTrigger(promo: any, cartItems: any[]) {
   }
 
   if (promo.triggerCategory) {
+    // ✅ tenta pelo que foi salvo no carrinho
+    const bySavedCategory = cartItems.some((it: any) => String(it.productCategory) === String(promo.triggerCategory));
+    if (bySavedCategory) return true;
+
+    // fallback antigo
     return cartItems.some((it: any) => {
       const prod = getProductById(Number(it.productId));
       return prod?.category === promo.triggerCategory;
@@ -304,6 +309,7 @@ function cartHasTrigger(promo: any, cartItems: any[]) {
 
   return false;
 }
+
 
 function cartItemIsTrigger(promo: any, cartItem: any) {
   const pid = Number(cartItem.productId);
