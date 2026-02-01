@@ -305,32 +305,54 @@ function cartHasTrigger(promo: any, cartItems: any[]) {
   return false;
 }
 
-function promoTargetsItem(promo: any, cartItem: any) {
+function cartItemIsTrigger(promo: any, cartItem: any) {
   const pid = Number(cartItem.productId);
 
-  // ❌ nunca aplicar recompensa no gatilho por ID
+  // trigger por produto
   const triggerIds = csvToIds(promo.triggerProductIds);
-  if (triggerIds.includes(pid)) return false;
+  if (triggerIds.includes(pid)) return true;
 
-  // ✅ match por rewardProductIds SEM precisar products
+  // trigger por categoria
+  if (promo.triggerCategory) {
+    const prod = getProductById(pid);
+    if (prod && String(prod.category) === String(promo.triggerCategory)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function promoTargetsItem(promo: any, cartItem: any) {
+  // 🚫 NUNCA aplicar recompensa no gatilho
+  if (cartItemIsTrigger(promo, cartItem)) return false;
+
+  const pid = Number(cartItem.productId);
+
+  // reward por produto
   const rewardIds = csvToIds(promo.rewardProductIds);
   if (rewardIds.length > 0) {
     return rewardIds.includes(pid);
   }
 
-  // (Categoria só funciona se products estiver carregado)
+  // reward por categoria
   if (promo.rewardCategory) {
     const prod = getProductById(pid);
     if (!prod) return false;
-    // também protege categoria gatilho
-    if (promo.triggerCategory && promo.rewardCategory === promo.triggerCategory && prod.category === promo.triggerCategory) {
-      return false;
-    }
-    return prod.category === promo.rewardCategory;
+    return String(prod.category) === String(promo.rewardCategory);
   }
 
   return false;
 }
+
+
+
+
+
+
+
+
+
 
 
 // ✅ calcula preço exibido no carrinho (aplica 1 grátis)

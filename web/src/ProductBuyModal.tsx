@@ -144,39 +144,48 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   return byId || byCat;
 }
 
-function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
+  function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
   const original = Number(optionItem.price || 0);
   let best = original;
 
   for (const pr of promos || []) {
     if (!pr?.active) continue;
 
-    // só as promos que mudam preço
-    if (pr.rewardType !== "FIXED_PRICE" && pr.rewardType !== "DISCOUNT_PERCENT") continue;
+    // ✅ Opções só mudam se a opção for RECOMPENSA (rewardOptionItemIds)
+    const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
+    if (rewardOptIds.length === 0) continue;
+    if (!rewardOptIds.includes(Number(optionItem.id))) continue;
 
-    // gatilho precisa bater no produto
+    // (opcional) se você quiser exigir que a promo "se aplique ao produto"
+    // mantenha. Se suas promos de opções não usam categoria/produto, pode remover.
     if (!promoAppliesToProduct(pr, prod)) continue;
 
-    // e precisa bater no optionItem (se tiver lista)
-    const optIds = csvToIds(pr.triggerOptionItemIds);
-    if (optIds.length > 0 && !optIds.includes(Number(optionItem.id))) continue;
-
+    // ✅ FIXED_PRICE em opções
     if (pr.rewardType === "FIXED_PRICE") {
       const fp = Number(pr.fixedPrice || 0);
       if (fp >= 0) best = Math.min(best, fp);
+      continue;
     }
 
+    // ✅ DISCOUNT_PERCENT em opções (só se VOCÊ usar esse caso em alguma promo de opção)
+    // Se você NUNCA pretende desconto percentual em opção, pode remover esse bloco inteiro.
     if (pr.rewardType === "DISCOUNT_PERCENT") {
       const pct = Number(pr.discountPercent || 0);
       if (pct > 0 && pct <= 100) {
         const np = Number((original * (100 - pct) / 100).toFixed(2));
         best = Math.min(best, np);
       }
+      continue;
     }
   }
 
   return best;
 }
+
+
+
+
+
   function getAdjustedOptionPriceInModal(optionItem: any, promoList: any[]) {
   const base = Number(optionItem?.price || 0);
 
