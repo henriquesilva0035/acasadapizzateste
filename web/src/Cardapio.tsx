@@ -72,15 +72,17 @@ export default function Cardapio() {
   //Promoções do dia
   const { promos } = usePromotionsToday();
 
-  function computeCartSubtotalWithPromos() {
+function computeCartSubtotalWithPromos() {
   if (!promos || promos.length === 0) return total;
 
   const lines = items.map((it: any) => ({ ...it }));
 
   const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
 
+  // total base
   for (const it of lines) {
-    it.__displayTotal = Number((baseUnit(it) * Number(it.qty || 1)).toFixed(2));
+    it.__baseUnit = baseUnit(it);
+    it.__displayTotal = Number((it.__baseUnit * Number(it.qty || 1)).toFixed(2));
   }
 
   const hasTrigger = (pr: any) => {
@@ -88,6 +90,7 @@ export default function Cardapio() {
     if (triggerIds.length > 0) {
       return lines.some((it: any) => triggerIds.includes(Number(it.productId)));
     }
+    // (no botão flutuante vamos ignorar categoria por enquanto)
     return false;
   };
 
@@ -101,34 +104,59 @@ export default function Cardapio() {
 
   for (const pr of promos) {
     if (!pr?.active) continue;
-    if (pr.rewardType !== "ITEM_FREE") continue;
     if (!hasTrigger(pr)) continue;
 
-    let remainingFree = Number(pr.maxRewardQty || 1);
+    const targets = lines.filter((it: any) => isReward(pr, it));
+    if (targets.length === 0) continue;
 
-    const rewardLines = lines
-      .filter((it: any) => isReward(pr, it))
-      .sort((a, b) => baseUnit(a) - baseUnit(b));
+    // ✅ DISCOUNT_PERCENT
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct <= 0) continue;
 
-    for (const it of rewardLines) {
-      if (remainingFree <= 0) break;
-
-      const q = Number(it.qty || 1);
-      const freeQty = Math.min(q, remainingFree);
-
-      if (freeQty === q) {
-        it.__displayTotal = 0;
-      } else {
-        it.__displayTotal = Number((baseUnit(it) * (q - freeQty)).toFixed(2));
+      for (const it of targets) {
+        const newUnit = Number((it.__baseUnit * (100 - pct) / 100).toFixed(2));
+        it.__displayTotal = Number((newUnit * Number(it.qty || 1)).toFixed(2));
       }
+      continue;
+    }
 
-      remainingFree -= freeQty;
+    // ✅ FIXED_PRICE
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp <= 0) continue;
+
+      for (const it of targets) {
+        it.__displayTotal = Number((fp * Number(it.qty || 1)).toFixed(2));
+      }
+      continue;
+    }
+
+    // ✅ ITEM_FREE (1 grátis)
+    if (pr.rewardType === "ITEM_FREE") {
+      let remainingFree = Number(pr.maxRewardQty || 1);
+
+      const rewardLines = [...targets].sort((a, b) => a.__baseUnit - b.__baseUnit);
+
+      for (const it of rewardLines) {
+        if (remainingFree <= 0) break;
+
+        const q = Number(it.qty || 1);
+        const freeQty = Math.min(q, remainingFree);
+
+        if (freeQty === q) it.__displayTotal = 0;
+        else it.__displayTotal = Number((it.__baseUnit * (q - freeQty)).toFixed(2));
+
+        remainingFree -= freeQty;
+      }
+      continue;
     }
   }
 
   const subtotal = lines.reduce((acc, it) => acc + Number(it.__displayTotal || 0), 0);
   return Number(subtotal.toFixed(2));
 }
+
 
 // ✅ DECLARA A VARIÁVEL AQUI (fora de funções)
 const dynamicTotal = computeCartSubtotalWithPromos();
