@@ -1,8 +1,7 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./lib/api";
 import { useCart } from "./contexts/CartContext";
 import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
-
 
 // --- TIPOS ---
 type ChargeMode = "SUM" | "MAX" | "MIN";
@@ -46,7 +45,20 @@ type Props = {
   onAdded?: () => void;
 };
 
-// --- HELPERS ---
+/**
+ * =========================================================
+ * ✅ HELPERS (organizados)
+ * - moneyToNumber / sum: utilidades gerais
+ * - isPromoActive: promo FIXA do produto (promoPrice + promoDays)
+ * - Promo engine do modal:
+ *   - preço de OPÇÃO: só muda se rewardOptionItemIds incluir a opção
+ *   - preço do PRODUTO (base): aplica DISCOUNT_PERCENT quando:
+ *       - o produto atual é RECOMPENSA (rewardProductIds/rewardCategory)
+ *       - existe GATILHO no carrinho (triggerProductIds/triggerCategory)
+ *       - e o produto atual NÃO é o gatilho
+ * =========================================================
+ */
+
 function sum(arr: number[]) {
   return arr.reduce((a, b) => a + b, 0);
 }
@@ -59,10 +71,12 @@ function moneyToNumber(v: any) {
 function isPromoActive(p: Product) {
   const promo = moneyToNumber(p.promoPrice);
   if (!promo || promo <= 0) return false;
+
   const daysStr = String(p.promoDays ?? "").trim();
   if (!daysStr) return true;
+
   const allowed = daysStr.split(",").map((x) => Number(String(x).trim()));
-  const today = new Date().getDay();
+  const today = new Date().getDay(); // 0=dom ... 6=sab
   return allowed.includes(today);
 }
 
@@ -78,8 +92,12 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   const [obs, setObs] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { promos } = usePromotionsToday()
-  const { addItem } = useCart();
+
+  const { promos } = usePromotionsToday();
+  const { addItem, items } = useCart();
+
+  // ✅ Map p/ descobrir categoria dos itens do carrinho (necessário p/ triggerCategory)
+  const [prodMeta, setProdMeta] = useState<Record<number, { category?: string | null }>>({});
 
   // ✅ refs pra calcular o tamanho real do rodapé e não “passar” por baixo
   const footerRef = useRef<HTMLDivElement | null>(null);
@@ -93,7 +111,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
     const update = () => {
       const h = Math.ceil(el.getBoundingClientRect().height || 0);
-      if (h > 0) setFooterH(h + 16); // +16 de folga
+      if (h > 0) setFooterH(h + 16);
     };
 
     update();
@@ -104,7 +122,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     return () => ro.disconnect();
   }, [open, product]);
 
-  // ✅ trava o scroll do site por trás (evita "puxar" e tremer)
+  // ✅ trava o scroll do site por trás
   useEffect(() => {
     if (!open) return;
 
@@ -137,82 +155,156 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       .finally(() => setLoading(false));
   }, [open, productId]);
 
+  /**
+   * ✅ Carrega meta simples dos produtos (id + category) para:
+   * - checar triggerCategory no carrinho (G/GG etc).
+   * Se seu endpoint /products já retorna category (mesmo “light”), isso resolve.
+   */
+  useEffect(() => {
+    if (!open) return;
+
+    (async () => {
+      try {
+        const list = await apiFetch<any[]>(`/products`);
+        const map: Record<number, { category?: string | null }> = {};
+        for (const p of Array.isArray(list) ? list : []) {
+          const id = Number(p?.id);
+          if (!Number.isFinite(id)) continue;
+          map[id] = { category: p?.category ?? null };
+        }
+        setProdMeta(map);
+      } catch {
+        // se falhar, triggerCategory pode não funcionar no modal,
+        // mas triggerProductIds continua funcionando.
+        setProdMeta({});
+      }
+    })();
+  }, [open]);
+
+  /**
+   * =========================================================
+   * ✅ PROMO: OPÇÕES (sabores/bordas)
+   *
+   * Regra:
+   * - Só muda preço da opção se ela estiver em rewardOptionItemIds
+   * - Assim: promo “G/GG -> P 50%” NÃO mexe em opções do GG
+   * =========================================================
+   */
+
+  // (opcional) se você usa triggerCategory/triggerProductIds para “marcar” onde a promo de opção aparece
   function promoAppliesToProduct(pr: any, prod: Product) {
-  const triggerIds = csvToIds(pr.triggerProductIds);
-  const byId = triggerIds.length ? triggerIds.includes(Number(prod.id)) : false;
-  const byCat = pr.triggerCategory ? pr.triggerCategory === prod.category : false;
-  return byId || byCat;
-}
+    const triggerIds = csvToIds(pr.triggerProductIds);
+    const byId = triggerIds.length ? triggerIds.includes(Number(prod.id)) : false;
+    const byCat = pr.triggerCategory ? String(pr.triggerCategory) === String(prod.category) : false;
+    return byId || byCat;
+  }
 
   function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
-  const original = Number(optionItem.price || 0);
-  let best = original;
+    const original = Number(optionItem.price || 0);
+    let best = original;
 
-  for (const pr of promos || []) {
-    if (!pr?.active) continue;
+    for (const pr of promos || []) {
+      if (!pr?.active) continue;
 
-    // ✅ Opções só mudam se a opção for RECOMPENSA (rewardOptionItemIds)
-    const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
-    if (rewardOptIds.length === 0) continue;
-    if (!rewardOptIds.includes(Number(optionItem.id))) continue;
+      // ✅ Opção só muda preço se ela estiver na RECOMPENSA
+      const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
+      if (rewardOptIds.length === 0) continue;
+      if (!rewardOptIds.includes(Number(optionItem.id))) continue;
 
-    // (opcional) se você quiser exigir que a promo "se aplique ao produto"
-    // mantenha. Se suas promos de opções não usam categoria/produto, pode remover.
-    if (!promoAppliesToProduct(pr, prod)) continue;
+      // mantém para “escopo” de onde a promo vale (se você quiser)
+      if (!promoAppliesToProduct(pr, prod)) continue;
 
-    // ✅ FIXED_PRICE em opções
-    if (pr.rewardType === "FIXED_PRICE") {
-      const fp = Number(pr.fixedPrice || 0);
-      if (fp >= 0) best = Math.min(best, fp);
-      continue;
+      if (pr.rewardType === "FIXED_PRICE") {
+        const fp = Number(pr.fixedPrice || 0);
+        if (fp >= 0) best = Math.min(best, fp);
+        continue;
+      }
+
+      if (pr.rewardType === "DISCOUNT_PERCENT") {
+        const pct = Number(pr.discountPercent || 0);
+        if (pct > 0 && pct <= 100) {
+          const np = Number((original * (100 - pct) / 100).toFixed(2));
+          best = Math.min(best, np);
+        }
+        continue;
+      }
     }
 
-    // ✅ DISCOUNT_PERCENT em opções (só se VOCÊ usar esse caso em alguma promo de opção)
-    // Se você NUNCA pretende desconto percentual em opção, pode remover esse bloco inteiro.
-    if (pr.rewardType === "DISCOUNT_PERCENT") {
+    return best;
+  }
+
+  /**
+   * =========================================================
+   * ✅ PROMO: BASE DO PRODUTO (ex: P com 50% OFF)
+   *
+   * - O cardápio mostra 15 certo porque aplica promo dinâmica
+   * - O modal precisa aplicar também (pra salvar unitPrice correto)
+   * =========================================================
+   */
+
+  function cartHasTrigger(promo: any, cartItems: any[]) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
+
+    if (triggerIds.length > 0) {
+      return cartItems.some((it: any) => triggerIds.includes(Number(it.productId)));
+    }
+
+    if (promo.triggerCategory) {
+      return cartItems.some((it: any) => {
+        const pid = Number(it.productId);
+        const cat = prodMeta?.[pid]?.category ?? null;
+        return cat != null && String(cat) === String(promo.triggerCategory);
+      });
+    }
+
+    return false;
+  }
+
+  function productIsReward(promo: any, prod: Product) {
+    const rewardIds = csvToIds(promo.rewardProductIds);
+    if (rewardIds.length > 0) return rewardIds.includes(Number(prod.id));
+
+    if (promo.rewardCategory) return String(promo.rewardCategory) === String(prod.category);
+
+    return false;
+  }
+
+  function productIsTrigger(promo: any, prod: Product) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
+    if (triggerIds.length > 0 && triggerIds.includes(Number(prod.id))) return true;
+
+    if (promo.triggerCategory && String(prod.category) === String(promo.triggerCategory)) return true;
+
+    return false;
+  }
+
+  function applyDynamicProductPromos(prod: Product, base: number, cartItems: any[]) {
+    let best = base;
+
+    for (const pr of promos || []) {
+      if (!pr?.active) continue;
+
+      // ✅ aqui: só cuidamos do desconto percentual no produto (P)
+      if (pr.rewardType !== "DISCOUNT_PERCENT") continue;
+
+      // precisa existir gatilho no carrinho (G/GG)
+      if (!cartHasTrigger(pr, cartItems)) continue;
+
+      // produto atual tem que ser recompensa
+      if (!productIsReward(pr, prod)) continue;
+
+      // e nunca aplicar se este produto for o gatilho
+      if (productIsTrigger(pr, prod)) continue;
+
       const pct = Number(pr.discountPercent || 0);
       if (pct > 0 && pct <= 100) {
-        const np = Number((original * (100 - pct) / 100).toFixed(2));
+        const np = Number((base * (100 - pct) / 100).toFixed(2));
         best = Math.min(best, np);
       }
-      continue;
     }
+
+    return best;
   }
-
-  return best;
-}
-
-
-
-
-
-  function getAdjustedOptionPriceInModal(optionItem: any, promoList: any[]) {
-  const base = Number(optionItem?.price || 0);
-
-  for (const pr of promoList || []) {
-    if (!pr?.active) continue;
-
-    const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
-    if (!rewardOptIds.includes(Number(optionItem.id))) continue;
-
-    if (pr.rewardType === "FIXED_PRICE") {
-      const fp = Number(pr.fixedPrice || 0);
-      if (fp > 0) return fp;
-    }
-
-    if (pr.rewardType === "DISCOUNT_PERCENT") {
-      const pct = Number(pr.discountPercent || 0);
-      if (pct > 0) return Number((base * (100 - pct) / 100).toFixed(2));
-    }
-  }
-
-  return base;
-}
-
-
-
-
-
 
   // ✅ cálculo de preço/validação
   const calc = useMemo(() => {
@@ -221,8 +313,12 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     const errors: string[] = [];
     let addons = 0;
 
+    // 1) base normal ou promo fixa do produto (promoPrice/promoDays)
     const promoOn = isPromoActive(product);
-    const base = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
+    let base = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
+
+    // 2) ✅ aplica promo dinâmica (ex: 50% OFF na P quando há GG/G no carrinho)
+    base = applyDynamicProductPromos(product, base, items || []);
 
     const summaryParts: string[] = [];
 
@@ -238,6 +334,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
       if (picks.length) summaryParts.push(`${g.title}: ${picks.map((x) => x.name).join(", ")}`);
 
+      // ✅ preço das opções com promo (somente se rewardOptionItemIds bater)
       const prices = picks.map((op) => getAdjustedOptionPrice(op, product));
       const mode = String(g.chargeMode || "SUM").toUpperCase();
 
@@ -248,11 +345,11 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       }
     }
 
-    const unit = base + addons;
-    const total = unit * Math.max(1, qty);
+    const unit = Number((base + addons).toFixed(2));
+    const total = Number((unit * Math.max(1, qty)).toFixed(2));
 
     return { addons, base, unit, total, errors, optionSummary: summaryParts.join(" | ") };
-  }, [product, selected, qty]);
+  }, [product, selected, qty, promos, items, prodMeta]);
 
   if (!open) return null;
 
@@ -276,17 +373,20 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       } else {
         next.delete(itemId);
       }
+
       return next;
     });
   }
 
   function handleAddToCart() {
     if (!product) return;
+
     if (calc.errors.length) {
       setErr(calc.errors[0]);
       return;
     }
 
+    // ✅ unitPrice já sai com promo dinâmica aplicada, então o carrinho vai mostrar certo
     addItem(
       {
         productId: product.id,
@@ -378,7 +478,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
             flex: 1,
             overflowY: "auto",
             padding: 20,
-            paddingBottom: footerH, // ✅ agora é calculado pelo footer real
+            paddingBottom: footerH,
             WebkitOverflowScrolling: "touch",
             overscrollBehavior: "contain",
           }}
@@ -395,6 +495,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
               <h2 style={{ margin: "0 0 5px 0", color: C_DARK }}>{product.name}</h2>
               <p style={{ margin: "0 0 15px 0", color: "#636e72", fontSize: 14 }}>{product.description}</p>
 
+              {/* ✅ base já aparece com promo dinâmica aplicada */}
               <div style={{ fontSize: 18, color: C_RED, fontWeight: 900, marginBottom: 20 }}>
                 R$ {Number(calc.base).toFixed(2)}
               </div>
@@ -497,33 +598,28 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                                   )}
 
                                   {(() => {
-                                                  const original = Number(it.price || 0);
-                                                  if (original <= 0) return null;
+                                    const original = Number(it.price || 0);
+                                    if (original <= 0) return null;
 
-                                                  const adj = product ? getAdjustedOptionPrice(it, product) : original;
-                                                  const changed = adj !== original;
+                                    const adj = product ? getAdjustedOptionPrice(it, product) : original;
+                                    const changed = adj !== original;
 
-                                                  return (
-                                                    <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                                      <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>
-                                                        + R$ {adj.toFixed(2)}
-                                                      </div>
+                                    return (
+                                      <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                        <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>+ R$ {adj.toFixed(2)}</div>
 
-                                                      {changed && (
-                                                        <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>
-                                                          + R$ {original.toFixed(2)}
-                                                        </div>
-                                                      )}
+                                        {changed && (
+                                          <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>+ R$ {original.toFixed(2)}</div>
+                                        )}
 
-                                                      {changed && (
-                                                        <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,184,148,0.12)", padding: "3px 8px", borderRadius: 999 }}>
-                                                          PROMO
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                  );
-                                                })()}
-
+                                        {changed && (
+                                          <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,184,148,0.12)", padding: "3px 8px", borderRadius: 999 }}>
+                                            PROMO
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
 
@@ -567,8 +663,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                     borderRadius: 12,
                     border: "1px solid #ddd",
                     fontFamily: "inherit",
-
-                    // ✅ travas reais
                     resize: "none",
                     minHeight: 92,
                     maxHeight: 92,
@@ -577,7 +671,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                   }}
                 />
 
-                {/* ✅ CSS inline anti-!important global */}
                 <style>{`
                   textarea.oc-obs {
                     resize: none !important;
@@ -614,7 +707,10 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
               <span style={{ fontSize: 16, fontWeight: "bold", minWidth: 20, textAlign: "center" }}>{qty}</span>
 
-              <button onClick={() => setQty(qty + 1)} style={{ width: 40, height: "100%", background: "none", border: "none", fontSize: 20, color: C_RED, cursor: "pointer" }}>
+              <button
+                onClick={() => setQty(qty + 1)}
+                style={{ width: 40, height: "100%", background: "none", border: "none", fontSize: 20, color: C_RED, cursor: "pointer" }}
+              >
                 +
               </button>
             </div>

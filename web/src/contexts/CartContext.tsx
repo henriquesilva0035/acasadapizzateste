@@ -41,8 +41,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   function addItem(item: Omit<CartItem, "qty">, qty: number = 1) {
     setItems((prev) => {
       const idx = prev.findIndex(
-        (x) => x.productId === item.productId && x.optionSummary === item.optionSummary
-      );
+  (x) => x.productId === item.productId && x.optionSummary === item.optionSummary && x.unitPrice === item.unitPrice
+);
+
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx].qty += qty;
