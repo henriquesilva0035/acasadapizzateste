@@ -177,24 +177,30 @@ function cartHasTrigger(promo: any, cartItems: any[]) {
 }
 
 function promoTargetsItem(promo: any, cartItem: any) {
-  const prod = getProductById(Number(cartItem.productId));
-  if (!prod) return false;
+  const pid = Number(cartItem.productId);
 
-  // ❌ nunca aplicar recompensa no produto gatilho
+  // ❌ nunca aplicar recompensa no gatilho por ID
   const triggerIds = csvToIds(promo.triggerProductIds);
-  if (triggerIds.includes(Number(prod.id))) return false;
+  if (triggerIds.includes(pid)) return false;
 
-  if (promo.triggerCategory && promo.rewardCategory && promo.triggerCategory === promo.rewardCategory) {
-    // evita "categoria igual" aplicar no gatilho
-    if (prod.category === promo.triggerCategory) return false;
+  // ✅ match por rewardProductIds SEM precisar products
+  const rewardIds = csvToIds(promo.rewardProductIds);
+  if (rewardIds.length > 0) {
+    return rewardIds.includes(pid);
   }
 
-  const rewardIds = csvToIds(promo.rewardProductIds);
+  // (Categoria só funciona se products estiver carregado)
+  if (promo.rewardCategory) {
+    const prod = getProductById(pid);
+    if (!prod) return false;
+    // também protege categoria gatilho
+    if (promo.triggerCategory && promo.rewardCategory === promo.triggerCategory && prod.category === promo.triggerCategory) {
+      return false;
+    }
+    return prod.category === promo.rewardCategory;
+  }
 
-  const idMatch = rewardIds.length > 0 ? rewardIds.includes(Number(prod.id)) : false;
-  const catMatch = promo.rewardCategory ? prod.category === promo.rewardCategory : false;
-
-  return idMatch || catMatch;
+  return false;
 }
 
 
