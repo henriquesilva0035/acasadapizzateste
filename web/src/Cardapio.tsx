@@ -300,6 +300,44 @@ const dynamicTotal = computeCartSubtotalWithPromos();
 
   };
 
+  function promoAppliesToProduct(pr: any, product: any) {
+  const triggerIds = csvToIds(pr.triggerProductIds);
+  const byId = triggerIds.length ? triggerIds.includes(Number(product.id)) : false;
+  const byCat = pr.triggerCategory ? pr.triggerCategory === product.category : false;
+  return byId || byCat;
+}
+
+function getAdjustedOptionPrice(optionItem: any, product: any) {
+  const original = Number(optionItem.price || 0);
+  let best = original;
+
+  for (const pr of promos || []) {
+    if (!pr?.active) continue;
+    if (pr.rewardType !== "FIXED_PRICE" && pr.rewardType !== "DISCOUNT_PERCENT") continue;
+    if (!promoAppliesToProduct(pr, product)) continue;
+
+    const optIds = csvToIds(pr.triggerOptionItemIds);
+    if (optIds.length > 0 && !optIds.includes(Number(optionItem.id))) continue;
+
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp >= 0) best = Math.min(best, fp);
+    } else if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct > 0 && pct <= 100) {
+        const np = Number((original * (100 - pct) / 100).toFixed(2));
+        best = Math.min(best, np);
+      }
+    }
+  }
+
+  return best;
+}
+
+
+
+
+
 
   // ✅ Lógica Inteligente de Preço para o Cardápio
   function getDisplayPrice(p: any) {
@@ -321,6 +359,7 @@ const dynamicTotal = computeCartSubtotalWithPromos();
 
   
     // 3. Se for R$ 0.00, busca o menor preço nos SABORES primeiro (pra pizza não pegar borda)
+    // 3. Se for R$ 0.00, busca o menor preço nos SABORES primeiro (e já considera promo do sabor)
 const otherPrices: number[] = [];
 const flavorPrices: number[] = [];
 
@@ -331,29 +370,26 @@ if (p.optionGroups && Array.isArray(p.optionGroups)) {
     const title = String(g.title || "").toLowerCase();
 
     for (const it of g.items || []) {
-      const pr = Number(it.price || 0);
-      if (pr <= 0) continue;
+      const original = Number(it.price || 0);
+      if (original <= 0) continue;
 
-      // ✅ Prioriza grupo que tenha "sabor" no título
-      if (title.includes("sabor")) flavorPrices.push(pr);
-      else otherPrices.push(pr);
+      const adj = getAdjustedOptionPrice(it, p);
+
+      if (title.includes("sabor")) flavorPrices.push(adj);
+      else otherPrices.push(adj);
     }
   }
 }
 
-// Achou preço em sabores? usa ele
 if (flavorPrices.length > 0) {
   const min = Math.min(...flavorPrices);
   return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
 }
 
-// Senão, cai pro menor de qualquer outro grupo (borda, adicionais etc)
 if (otherPrices.length > 0) {
   const min = Math.min(...otherPrices);
   return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
 }
-
-
 
     
    

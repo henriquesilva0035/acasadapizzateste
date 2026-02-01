@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../config";
 
 export type Promo = {
+ 
   id: number;
   name: string;
   active: boolean;
@@ -9,16 +10,23 @@ export type Promo = {
 
   triggerCategory?: string | null;
   triggerProductIds?: string | null;
+  triggerOptionItemIds?: string | null;   // ✅ ADD
 
-  rewardType: "ITEM_FREE" | "DISCOUNT_PERCENT" | "FIXED_PRICE" | "OPTION_FREE";
+  rewardType: "ITEM_FREE" | "OPTION_FREE" | "DISCOUNT_PERCENT" | "FIXED_PRICE"; // ✅ inclua FIXED_PRICE
   rewardCategory?: string | null;
   rewardProductIds?: string | null;
+  rewardOptionItemIds?: string | null;    // ✅ ADD
 
   discountPercent?: number | null;
-  fixedPrice?: number | null;
-  maxRewardQty: number;
-  showOnMenu: boolean;
+  fixedPrice?: number | null;             // ✅ ADD
+  maxRewardQty?: number | null;
+  showOnMenu?: boolean | null;
+
+  createdAt?: string;
+  updatedAt?: string;
 };
+
+
 
 export function csvToIds(v?: string | null): number[] {
   if (!v) return [];

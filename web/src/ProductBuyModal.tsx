@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./lib/api";
 import { useCart } from "./contexts/CartContext";
+import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
+
 
 // --- TIPOS ---
 type ChargeMode = "SUM" | "MAX" | "MIN";
@@ -76,7 +78,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   const [obs, setObs] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+  const { promos } = usePromotionsToday()
   const { addItem } = useCart();
 
   // ✅ refs pra calcular o tamanho real do rodapé e não “passar” por baixo
@@ -135,6 +137,74 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       .finally(() => setLoading(false));
   }, [open, productId]);
 
+  function promoAppliesToProduct(pr: any, prod: Product) {
+  const triggerIds = csvToIds(pr.triggerProductIds);
+  const byId = triggerIds.length ? triggerIds.includes(Number(prod.id)) : false;
+  const byCat = pr.triggerCategory ? pr.triggerCategory === prod.category : false;
+  return byId || byCat;
+}
+
+function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
+  const original = Number(optionItem.price || 0);
+  let best = original;
+
+  for (const pr of promos || []) {
+    if (!pr?.active) continue;
+
+    // só as promos que mudam preço
+    if (pr.rewardType !== "FIXED_PRICE" && pr.rewardType !== "DISCOUNT_PERCENT") continue;
+
+    // gatilho precisa bater no produto
+    if (!promoAppliesToProduct(pr, prod)) continue;
+
+    // e precisa bater no optionItem (se tiver lista)
+    const optIds = csvToIds(pr.triggerOptionItemIds);
+    if (optIds.length > 0 && !optIds.includes(Number(optionItem.id))) continue;
+
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp >= 0) best = Math.min(best, fp);
+    }
+
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct > 0 && pct <= 100) {
+        const np = Number((original * (100 - pct) / 100).toFixed(2));
+        best = Math.min(best, np);
+      }
+    }
+  }
+
+  return best;
+}
+  function getAdjustedOptionPriceInModal(optionItem: any, promoList: any[]) {
+  const base = Number(optionItem?.price || 0);
+
+  for (const pr of promoList || []) {
+    if (!pr?.active) continue;
+
+    const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
+    if (!rewardOptIds.includes(Number(optionItem.id))) continue;
+
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp > 0) return fp;
+    }
+
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct > 0) return Number((base * (100 - pct) / 100).toFixed(2));
+    }
+  }
+
+  return base;
+}
+
+
+
+
+
+
   // ✅ cálculo de preço/validação
   const calc = useMemo(() => {
     if (!product) return { addons: 0, total: 0, unit: 0, base: 0, errors: [], optionSummary: "" };
@@ -159,7 +229,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
       if (picks.length) summaryParts.push(`${g.title}: ${picks.map((x) => x.name).join(", ")}`);
 
-      const prices = picks.map((p) => Number(p.price || 0));
+      const prices = picks.map((op) => getAdjustedOptionPrice(op, product));
       const mode = String(g.chargeMode || "SUM").toUpperCase();
 
       if (prices.length) {
@@ -417,7 +487,34 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                                     </div>
                                   )}
 
-                                  {it.price > 0 && <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13, marginTop: 2 }}>+ R$ {it.price.toFixed(2)}</div>}
+                                  {(() => {
+                                                  const original = Number(it.price || 0);
+                                                  if (original <= 0) return null;
+
+                                                  const adj = product ? getAdjustedOptionPrice(it, product) : original;
+                                                  const changed = adj !== original;
+
+                                                  return (
+                                                    <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                                      <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>
+                                                        + R$ {adj.toFixed(2)}
+                                                      </div>
+
+                                                      {changed && (
+                                                        <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>
+                                                          + R$ {original.toFixed(2)}
+                                                        </div>
+                                                      )}
+
+                                                      {changed && (
+                                                        <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,184,148,0.12)", padding: "3px 8px", borderRadius: 999 }}>
+                                                          PROMO
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })()}
+
                                 </div>
                               </div>
 

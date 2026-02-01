@@ -158,6 +158,99 @@ export default function CartModal({ open, onClose }: Props) {
   function getProductById(id: number) {
   return products.find((p) => Number(p.id) === Number(id));
 }
+function findOptionItem(product: any, optionItemId: number) {
+  for (const g of product?.optionGroups || []) {
+    for (const it of g.items || []) {
+      if (Number(it.id) === Number(optionItemId)) return { group: g, item: it };
+    }
+  }
+  return null;
+}
+
+
+function getAdjustedOptionPrice(optionItem: any, prod: any, cartLines?: any[]) {
+  const base = Number(optionItem?.price || 0);
+
+  // Sem promo carregada, devolve preço normal
+  const list = Array.isArray(promos) ? promos : [];
+  if (list.length === 0) return base;
+
+  // A promo precisa estar ativa E com FIXED_PRICE e com rewardOptionItemIds contendo esse optionItem.id
+  for (const pr of list) {
+    if (!pr?.active) continue;
+    if (pr.rewardType !== "FIXED_PRICE") continue;
+
+    const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
+    if (!rewardOptIds.includes(Number(optionItem.id))) continue;
+
+    // precisa bater gatilho:
+    // 1) se tem triggerProductIds -> carrinho precisa ter algum trigger
+    // 2) se tem triggerCategory -> carrinho precisa ter categoria trigger
+    // 3) se não tiver nada, aplica direto
+    const linesToCheck = cartLines || [];
+
+    const hasTrigger =
+      (csvToIds(pr.triggerProductIds).length > 0 && cartHasTrigger(pr, linesToCheck)) ||
+      (!!pr.triggerCategory && cartHasTrigger(pr, linesToCheck)) ||
+      (csvToIds(pr.triggerProductIds).length === 0 && !pr.triggerCategory);
+
+    // fallback: se não passaram cartLines (ex: cálculo isolado), permite aplicar se o produto atual é o gatilho
+    const productIsTrigger =
+      csvToIds(pr.triggerProductIds).includes(Number(prod?.id)) ||
+      (!!pr.triggerCategory && String(prod?.category) === String(pr.triggerCategory));
+
+    if (!hasTrigger && !productIsTrigger) continue;
+
+    const fp = Number(pr.fixedPrice || 0);
+    if (fp > 0) return fp;
+  }
+
+  return base;
+}
+
+
+
+
+
+
+
+function computeUnitFromProductAndOptions(cartItem: any) {
+  const prod = getProductById(Number(cartItem.productId));
+  if (!prod) return Number(cartItem.unitPrice ?? 0);
+
+  // base do produto (se for 0, vai depender das opções)
+  const base = Number(prod.price || 0);
+
+  const selectedIds = (cartItem.optionIds || []).map(Number);
+  const selectedSet = new Set(selectedIds);
+
+  let addons = 0;
+
+  for (const g of prod.optionGroups || []) {
+    if (g.available === false) continue;
+
+    const selectedInGroup = (g.items || []).filter((it: any) => selectedSet.has(Number(it.id)));
+    if (!selectedInGroup.length) continue;
+
+    const prices = selectedInGroup.map((it: any) =>
+  getAdjustedOptionPrice(it, prod, items));
+
+    const mode = String(g.chargeMode || "SUM").toUpperCase();
+    
+
+    let groupAdd = 0;
+    if (mode === "MAX") groupAdd = Math.max(...prices);
+    else if (mode === "MIN") groupAdd = Math.min(...prices);
+    else groupAdd = prices.reduce((a: number, b: number) => a + b, 0);
+
+    addons += groupAdd;
+  }
+
+  return Number((base + addons).toFixed(2));
+}
+
+
+
 
 function cartHasTrigger(promo: any, cartItems: any[]) {
   const triggerIds = csvToIds(promo.triggerProductIds);
@@ -209,7 +302,7 @@ function promoTargetsItem(promo: any, cartItem: any) {
   function computeCartDisplay(items: any[]) {
   const lines = items.map((it) => ({ ...it }));
 
-  const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
+  const baseUnit = (it: any) => computeUnitFromProductAndOptions(it);
 
   // subtotal sem promo (pra calcular economia)
   let baseSubtotal = 0;
