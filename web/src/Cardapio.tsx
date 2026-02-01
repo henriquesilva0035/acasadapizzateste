@@ -319,23 +319,44 @@ const dynamicTotal = computeCartSubtotalWithPromos();
       return { label: `R$ ${base.toFixed(2)}`, isPromo: false };
     }
 
-    // 3. Se for R$ 0.00, busca o menor preço dentro dos grupos de opções
-    const optionPrices: number[] = [];
-    if (p.optionGroups && Array.isArray(p.optionGroups)) {
-      for (const g of p.optionGroups) {
-        if (g.available === false) continue;
-        for (const it of g.items || []) {
-           const pr = Number(it.price || 0);
-           if (pr > 0) optionPrices.push(pr);
-        }
-      }
-    }
+  
+    // 3. Se for R$ 0.00, busca o menor preço nos SABORES primeiro (pra pizza não pegar borda)
+const otherPrices: number[] = [];
+const flavorPrices: number[] = [];
 
-    // Achou algum preço nos opcionais? Pega o menor (A partir de...)
-    if (optionPrices.length > 0) {
-      const min = Math.min(...optionPrices);
-      return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
+if (p.optionGroups && Array.isArray(p.optionGroups)) {
+  for (const g of p.optionGroups) {
+    if (g.available === false) continue;
+
+    const title = String(g.title || "").toLowerCase();
+
+    for (const it of g.items || []) {
+      const pr = Number(it.price || 0);
+      if (pr <= 0) continue;
+
+      // ✅ Prioriza grupo que tenha "sabor" no título
+      if (title.includes("sabor")) flavorPrices.push(pr);
+      else otherPrices.push(pr);
     }
+  }
+}
+
+// Achou preço em sabores? usa ele
+if (flavorPrices.length > 0) {
+  const min = Math.min(...flavorPrices);
+  return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
+}
+
+// Senão, cai pro menor de qualquer outro grupo (borda, adicionais etc)
+if (otherPrices.length > 0) {
+  const min = Math.min(...otherPrices);
+  return { label: `A partir de R$ ${min.toFixed(2)}`, isPromo: false, isFrom: true };
+}
+
+
+
+    
+   
 
     // 4. Se não achou nada, mostra zero mesmo
     return { label: 'R$ 0.00', isPromo: false };

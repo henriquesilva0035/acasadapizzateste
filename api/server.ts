@@ -62,77 +62,143 @@ function getProductPriceToday(p: any, dow: number) {
   return Number(p.price)
 }
 
-async function priceOneItem(prismaAny: any, payloadItem: any, dow: number) {
-  const productId = Number(payloadItem.productId)
-  const quantity = Math.max(1, Number(payloadItem.quantity || 1))
+function csvIds(v: any): number[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(Number).filter((n) => !Number.isNaN(n));
+  const s = String(v).trim();
+  if (!s) return [];
+  return s
+    .split(/[,\s|]+/g)
+    .map((x) => Number(x))
+    .filter((n) => !Number.isNaN(n));
+}
+
+function promoAppliesToProduct(promo: any, product: any) {
+  const trigIds = csvIds(promo.triggerProductIds);
+  const byId = trigIds.length ? trigIds.includes(Number(product.id)) : false;
+  const byCat = promo.triggerCategory ? promo.triggerCategory === product.category : false;
+  // se nenhum definido, não aplica
+  if (!trigIds.length && !promo.triggerCategory) return false;
+  return byId || byCat;
+}
+
+function getAdjustedOptionPrice(optionItem: any, promosToday: any[], product: any): { price: number; label: string | null } {
+  const original = Number(optionItem.price || 0);
+  let bestPrice = original;
+  let bestLabel: string | null = null;
+
+  for (const pr of promosToday || []) {
+    if (!pr?.active) continue;
+
+    // só vamos mexer em preço de option quando a promo é FIXED_PRICE ou DISCOUNT_PERCENT
+    if (pr.rewardType !== "FIXED_PRICE" && pr.rewardType !== "DISCOUNT_PERCENT") continue;
+
+    // tem que aplicar no produto (gatilho)
+    if (!promoAppliesToProduct(pr, product)) continue;
+
+    // precisa bater o optionItemIds (sabores selecionados na promo)
+    const optIds = csvIds(pr.triggerOptionItemIds);
+    if (optIds.length > 0 && !optIds.includes(Number(optionItem.id))) continue;
+
+    // aplica ajuste
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      if (fp >= 0 && fp < bestPrice) {
+        bestPrice = fp;
+        bestLabel = `FIXO R$ ${fp.toFixed(2)} (${pr.name})`;
+      }
+    }
+
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      if (pct > 0 && pct <= 100) {
+        const np = Number((original * (100 - pct) / 100).toFixed(2));
+        if (np < bestPrice) {
+          bestPrice = np;
+          bestLabel = `${pct}% OFF (${pr.name})`;
+        }
+      }
+    }
+  }
+
+  return { price: bestPrice, label: bestLabel };
+}
+
+async function priceOneItem(prismaAny: any, payloadItem: any, dow: number, promosToday: any[]) {
+  const productId = Number(payloadItem.productId);
+  const quantity = Math.max(1, Number(payloadItem.quantity || 1));
   const optionItemIds = (payloadItem.optionItemIds || [])
     .map((x: any) => Number(x))
-    .filter((n: number) => !Number.isNaN(n))
+    .filter((n: number) => !Number.isNaN(n));
 
   const product = await prismaAny.product.findUnique({
     where: { id: productId },
     include: { optionGroups: { include: { items: true } } },
-  })
-  if (!product) throw new Error(`Produto ${productId} não encontrado`)
-  if ((product as any).available === false) throw new Error(`Produto indisponível: ${product.name}`)
+  });
+  if (!product) throw new Error(`Produto ${productId} não encontrado`);
+  if ((product as any).available === false) throw new Error(`Produto indisponível: ${product.name}`);
 
   // valida seleção por grupo (min/max)
-  const selectedSet = new Set(optionItemIds)
+  const selectedSet = new Set(optionItemIds);
   for (const g of product.optionGroups) {
-    const selectedInGroup = g.items.filter((it: any) => selectedSet.has(it.id))
+    const selectedInGroup = g.items.filter((it: any) => selectedSet.has(it.id));
     if (selectedInGroup.length < Number(g.min || 0)) {
-      throw new Error(`Seleção inválida: grupo "${g.title}" exige mínimo ${g.min}`)
+      throw new Error(`Seleção inválida: grupo "${g.title}" exige mínimo ${g.min}`);
     }
     if (selectedInGroup.length > Number(g.max || 999)) {
-      throw new Error(`Seleção inválida: grupo "${g.title}" permite no máximo ${g.max}`)
+      throw new Error(`Seleção inválida: grupo "${g.title}" permite no máximo ${g.max}`);
     }
   }
 
-  const base = getProductPriceToday(product, dow)
+  const base = getProductPriceToday(product, dow);
 
-  // soma adicionais escolhidos (respeitando chargeMode do grupo)
-  // - SUM: soma todos selecionados
-  // - MAX: cobra apenas o maior (pizza meio a meio)
-  // - MIN: cobra apenas o menor
-  let addons = 0
-  const pickedItems: any[] = []
+  let addons = 0;
+  const pickedItems: any[] = [];
 
   for (const g of product.optionGroups) {
-    const selectedInGroup = (g.items || []).filter((it: any) => selectedSet.has(it.id))
-    if (!selectedInGroup.length) continue
+    const selectedInGroup = (g.items || []).filter((it: any) => selectedSet.has(it.id));
+    if (!selectedInGroup.length) continue;
 
     if ((g as any).available === false) {
-      throw new Error(`Grupo indisponível: ${g.title}`)
+      throw new Error(`Grupo indisponível: ${g.title}`);
     }
+
+    // preços ajustados (para promo em SABOR)
+    const adjustedPrices: number[] = [];
 
     for (const it of selectedInGroup) {
       if ((it as any).available === false) {
-        throw new Error(`Opção indisponível: ${it.name}`)
+        throw new Error(`Opção indisponível: ${it.name}`);
       }
+
+      const adj = getAdjustedOptionPrice(it, promosToday, product);
+
       pickedItems.push({
-        optionItemId: it.id,
+        optionItemId: it.id,           // ✅ correto
         groupId: g.id,
         groupTitle: g.title,
         name: it.name,
-        price: Number(it.price || 0),
+        price: adj.price,              // ✅ preço já ajustado
+        originalPrice: Number(it.price || 0),
+        promoLabel: adj.label,
         imageUrl: it.imageUrl || null,
-        
-      })
+      });
+
+      adjustedPrices.push(adj.price);
     }
 
-    const prices = selectedInGroup.map((it: any) => Number(it.price || 0))
-    const mode = String((g as any).chargeMode || "SUM").toUpperCase()
+    const mode = String((g as any).chargeMode || "SUM").toUpperCase();
 
-    let groupAdd = 0
-    if (mode === "MAX") groupAdd = Math.max(...prices)
-    else if (mode === "MIN") groupAdd = Math.min(...prices)
-    else groupAdd = prices.reduce((a: number, b: number) => a + b, 0)
+    let groupAdd = 0;
+    if (mode === "MAX") groupAdd = Math.max(...adjustedPrices);
+    else if (mode === "MIN") groupAdd = Math.min(...adjustedPrices);
+    else groupAdd = adjustedPrices.reduce((a: number, b: number) => a + b, 0);
 
-    addons += groupAdd
+    addons += groupAdd;
   }
 
-  const unit = Number(((base + addons)).toFixed(2))
-  const total = Number((unit * quantity).toFixed(2))
+  const unit = Number((base + addons).toFixed(2));
+  const total = Number((unit * quantity).toFixed(2));
 
   return {
     productId,
@@ -142,9 +208,10 @@ async function priceOneItem(prismaAny: any, payloadItem: any, dow: number) {
     total,
     pickedItems,
     appliedPromos: [],
-    payloadObservation: payloadItem?.observation || '',
-  }
+    payloadObservation: payloadItem?.observation || "",
+  };
 }
+
 
 // ================= PROMOÇÕES V2 (motor novo / IDs em CSV string) =================
 
@@ -2090,14 +2157,16 @@ app.post('/orders', async (request: any, reply: any) => {
 
   let computedItems: any[] = []
   try {
-    computedItems = await Promise.all(items.map((it: any) => priceOneItem(prisma, it, dow)))
-    // --- aplica promoções V2 ---
-    const promosAll = await prisma.promotion.findMany({
-      where: { active: true },
-    });
-    const promosToday = promosAll.filter((p: any) => promotionIsActiveTodayV2(p, dow));
+    // --- carrega promoções do dia primeiro ---
+      const promosAll = await prisma.promotion.findMany({ where: { active: true } })
+      const promosToday = promosAll.filter((p: any) => promotionIsActiveTodayV2(p, dow))
 
-    computedItems = applyPromotionsV2(computedItems, promosToday)
+      // --- calcula itens já com ajuste de OPTION (preço fixo do sabor) ---
+      computedItems = await Promise.all(items.map((it: any) => priceOneItem(prisma, it, dow, promosToday)))
+
+      // --- aplica promoções V2 (item grátis, etc) ---
+      computedItems = applyPromotionsV2(computedItems, promosToday)
+
 
   } catch (e: any) {
     return reply.status(400).send({ error: e?.message || 'Erro ao calcular itens.' })
