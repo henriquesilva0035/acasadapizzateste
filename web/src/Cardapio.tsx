@@ -72,6 +72,67 @@ export default function Cardapio() {
   //Promoções do dia
   const { promos } = usePromotionsToday();
 
+  function computeCartSubtotalWithPromos() {
+  if (!promos || promos.length === 0) return total;
+
+  const lines = items.map((it: any) => ({ ...it }));
+
+  const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
+
+  for (const it of lines) {
+    it.__displayTotal = Number((baseUnit(it) * Number(it.qty || 1)).toFixed(2));
+  }
+
+  const hasTrigger = (pr: any) => {
+    const triggerIds = csvToIds(pr.triggerProductIds);
+    if (triggerIds.length > 0) {
+      return lines.some((it: any) => triggerIds.includes(Number(it.productId)));
+    }
+    return false;
+  };
+
+  const isReward = (pr: any, it: any) => {
+    const rewardIds = csvToIds(pr.rewardProductIds);
+    if (rewardIds.length > 0) {
+      return rewardIds.includes(Number(it.productId));
+    }
+    return false;
+  };
+
+  for (const pr of promos) {
+    if (!pr?.active) continue;
+    if (pr.rewardType !== "ITEM_FREE") continue;
+    if (!hasTrigger(pr)) continue;
+
+    let remainingFree = Number(pr.maxRewardQty || 1);
+
+    const rewardLines = lines
+      .filter((it: any) => isReward(pr, it))
+      .sort((a, b) => baseUnit(a) - baseUnit(b));
+
+    for (const it of rewardLines) {
+      if (remainingFree <= 0) break;
+
+      const q = Number(it.qty || 1);
+      const freeQty = Math.min(q, remainingFree);
+
+      if (freeQty === q) {
+        it.__displayTotal = 0;
+      } else {
+        it.__displayTotal = Number((baseUnit(it) * (q - freeQty)).toFixed(2));
+      }
+
+      remainingFree -= freeQty;
+    }
+  }
+
+  const subtotal = lines.reduce((acc, it) => acc + Number(it.__displayTotal || 0), 0);
+  return Number(subtotal.toFixed(2));
+}
+
+// ✅ DECLARA A VARIÁVEL AQUI (fora de funções)
+const dynamicTotal = computeCartSubtotalWithPromos();
+
 
   //Nome por id
 
@@ -269,6 +330,14 @@ export default function Cardapio() {
   }
 
   return false;
+
+
+
+
+
+
+
+
 }
 
 function promoTargetsProduct(promo: any, product: any) {
@@ -629,6 +698,14 @@ function computePriceWithActivePromos(product: any, base: number, promosToday: a
 
   if (promosForProduct.length === 0) return null;
 
+  
+
+
+
+
+
+
+
   return (
     <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
       {promosForProduct.slice(0, 2).map((pr: any) => (
@@ -760,7 +837,7 @@ function computePriceWithActivePromos(product: any, base: number, promosToday: a
               </div>
               <span>Ver sacola</span>
             </div>
-            <span>R$ {total.toFixed(2)}</span>
+            <span>R$ {dynamicTotal.toFixed(2)}</span>
           </button>
         )}
       </div>
