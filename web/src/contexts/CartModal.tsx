@@ -1,9 +1,12 @@
 // ARQUIVO: src/contexts/CartModal.tsx
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
 import { useNavigate } from "react-router-dom";
 import { useCart } from "./CartContext";
 import { useOrder } from "./OrderContext";
 import { apiFetch } from "../lib/api";
+import { usePromotionsToday, csvToIds } from "../hooks/usePromotionsToday";
+
 
 type Props = {
   open: boolean;
@@ -49,6 +52,9 @@ export default function CartModal({ open, onClose }: Props) {
   const [selectedBairroId, setSelectedBairroId] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [changeFor, setChangeFor] = useState("");
+  const { promos } = usePromotionsToday();
+  const [products, setProducts] = useState<any[]>([]);
+
 
   // ✅ mede o footer pra dar paddingBottom no scroll e nada ficar “passando”
   const footerRef = useRef<HTMLDivElement | null>(null);
@@ -69,6 +75,23 @@ export default function CartModal({ open, onClose }: Props) {
       document.documentElement.style.overflow = prevHtml;
     };
   }, [open]);
+
+  useEffect(() => {
+  (async () => {
+    try {
+      const list = await apiFetch<any[]>("/products");
+      setProducts(Array.isArray(list) ? list : []);
+    } catch {
+      setProducts([]);
+    }
+  })();
+}, []);
+
+
+
+
+
+
 
   // ✅ recalcula footer quando abre / muda de step (porque no DETAILS tem taxa etc)
   useLayoutEffect(() => {
@@ -99,9 +122,15 @@ export default function CartModal({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  const bairroObj = bairros.find((b) => String(b.id) === String(selectedBairroId));
-  const taxaEntrega = deliveryMode === "DELIVERY" && bairroObj ? bairroObj.price : 0;
-  const finalTotal = total + taxaEntrega;
+    const cartView = computeCartDisplay(items);
+
+    const bairroObj = bairros.find((b) => String(b.id) === String(selectedBairroId));
+    const taxaEntrega = deliveryMode === "DELIVERY" && bairroObj ? bairroObj.price : 0;
+
+    // ✅ usa subtotal calculado com promo
+    const finalTotal = cartView.subtotal + taxaEntrega;
+
+
 
   function sendToWhatsApp(orderId: string, addressFull: string, payMethod: string) {
     const LOJA_PHONE = "5551990038803"; // ⚠️ SEU NÚMERO
@@ -125,6 +154,106 @@ export default function CartModal({ open, onClose }: Props) {
     window.open(`https://wa.me/${LOJA_PHONE}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
+
+  function getProductById(id: number) {
+  return products.find((p) => Number(p.id) === Number(id));
+}
+
+function cartHasTrigger(promo: any, cartItems: any[]) {
+  const triggerIds = csvToIds(promo.triggerProductIds);
+
+  if (triggerIds.length > 0) {
+    return cartItems.some((it: any) => triggerIds.includes(Number(it.productId)));
+  }
+
+  if (promo.triggerCategory) {
+    return cartItems.some((it: any) => {
+      const prod = getProductById(Number(it.productId));
+      return prod?.category === promo.triggerCategory;
+    });
+  }
+
+  return false;
+}
+
+function promoTargetsItem(promo: any, cartItem: any) {
+  const prod = getProductById(Number(cartItem.productId));
+  if (!prod) return false;
+
+  const rewardIds = csvToIds(promo.rewardProductIds);
+
+  const idMatch = rewardIds.length > 0 ? rewardIds.includes(Number(prod.id)) : false;
+  const catMatch = promo.rewardCategory ? prod.category === promo.rewardCategory : false;
+
+  return idMatch || catMatch;
+}
+
+// ✅ calcula preço exibido no carrinho (aplica 1 grátis)
+function computeCartDisplay(items: any[]) {
+  // copia para não mutar
+  const lines = items.map((it) => ({ ...it }));
+
+  // mapa: preço base do item (o que já está no carrinho)
+  const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
+
+  // começa com valores base
+  for (const it of lines) {
+    it.__displayUnit = baseUnit(it);
+    it.__displayTotal = Number((it.__displayUnit * Number(it.qty || 1)).toFixed(2));
+    it.__promoLabel = null;
+    it.__promoFreeQty = 0;
+  }
+
+  // aplica promoções
+  for (const pr of (promos || [])) {
+    if (!pr?.active) continue;
+    if (!cartHasTrigger(pr, lines)) continue;
+
+    // DISCOUNT_PERCENT / FIXED_PRICE (opcional no carrinho; por enquanto vamos focar no grátis)
+    if (pr.rewardType === "DISCOUNT_PERCENT" || pr.rewardType === "FIXED_PRICE") {
+      // depois a gente deixa igual ao cardápio, se quiser
+      continue;
+    }
+
+    // ITEM_FREE: controla 1 grátis no carrinho
+    if (pr.rewardType === "ITEM_FREE") {
+      let remainingFree = Number(pr.maxRewardQty || 1);
+
+      // pega itens que são reward
+      const rewardLines = lines.filter((it) => promoTargetsItem(pr, it));
+
+      // aplica grátis nos mais baratos primeiro
+      rewardLines.sort((a, b) => baseUnit(a) - baseUnit(b));
+
+      for (const it of rewardLines) {
+        if (remainingFree <= 0) break;
+
+        const q = Number(it.qty || 1);
+        const freeQty = Math.min(q, remainingFree);
+
+        // se tiver pelo menos 1 grátis, muda exibição para "grátis"
+        // (simplificado: se qty==1 vira 0; se qty>1, a gente mostra selo e ajusta total)
+        if (freeQty === q) {
+          it.__displayUnit = 0;
+          it.__displayTotal = 0;
+        } else {
+          // parte grátis, parte paga: total = (q-freeQty)*preço
+          it.__displayUnit = baseUnit(it); // mantém unit normal
+          it.__displayTotal = Number((baseUnit(it) * (q - freeQty)).toFixed(2));
+        }
+
+        it.__promoFreeQty = freeQty;
+        it.__promoLabel = `🎁 ${freeQty} grátis (promoção)`;
+        remainingFree -= freeQty;
+      }
+    }
+  }
+
+  const subtotal = lines.reduce((acc, it) => acc + Number(it.__displayTotal || 0), 0);
+  return { lines, subtotal: Number(subtotal.toFixed(2)) };
+}
+
+
   async function handleFinish() {
     if (!customerName.trim()) return alert("Digite seu nome.");
     if (!phone.trim()) return alert("Digite seu telefone.");
@@ -138,6 +267,7 @@ export default function CartModal({ open, onClose }: Props) {
       const val = Number(changeFor.replace(",", "."));
       if (changeFor && val < finalTotal) return alert("Troco inválido.");
     }
+
 
     const nomeBairro = bairroObj?.name || "";
     const addressFull = deliveryMode === "DELIVERY" ? `${rua}, ${numero} - ${nomeBairro}` : "Retirada";
@@ -170,6 +300,8 @@ export default function CartModal({ open, onClose }: Props) {
       alert("Erro ao enviar pedido.");
     }
   }
+  
+
 
   return (
     <div
@@ -240,7 +372,8 @@ export default function CartModal({ open, onClose }: Props) {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-                  {items.map((it, idx) => (
+                  {cartView.lines.map((it: any, idx: number) => (
+
                     <div
                       key={idx}
                       style={{
@@ -253,13 +386,19 @@ export default function CartModal({ open, onClose }: Props) {
                       {/* Nome e Preço */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                         <strong style={{ fontSize: 15, color: THEME.textDark }}>{it.name}</strong>
-                        <strong style={{ fontSize: 15, color: THEME.textDark }}>{formatBRL(it.unitPrice * it.qty)}</strong>
+                        <strong style={{ fontSize: 15, color: THEME.textDark }}>{formatBRL(Number(it.__displayTotal || 0))}</strong>
+                        {Number(it.__displayUnit) === 0 && (
+                          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 900, color: THEME.primary }}>
+                            🎁 Item grátis (promoção)
+                          </div>
+                        )}
+
                       </div>
 
                       {/* ✅ LISTA DE OPÇÕES FORMATADA */}
                       {it.optionSummary && (
                         <div style={{ marginBottom: 10, padding: "8px", background: "#f8f9fa", borderRadius: 8, fontSize: 12 }}>
-                          {it.optionSummary.split(" | ").map((opt, i) => (
+                          {it.optionSummary.split(" | ").map((opt: string, i: number) => (
                             <div key={i} style={{ marginBottom: 4, color: THEME.textGray }}>
                               {opt.includes(":") ? (
                                 <>
@@ -413,7 +552,7 @@ export default function CartModal({ open, onClose }: Props) {
         <div ref={footerRef} style={{ background: "white", padding: 20, borderTop: `1px solid ${THEME.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 13, color: THEME.textGray }}>
             <span>Subtotal</span>
-            <span>{formatBRL(total)}</span>
+            <span>{formatBRL(cartView.subtotal)}</span>
           </div>
 
           {step === "DETAILS" && deliveryMode === "DELIVERY" && (

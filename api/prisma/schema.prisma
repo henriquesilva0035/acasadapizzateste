@@ -75,11 +75,13 @@ model OrderItem {
   customerName String?  // Nome do cliente dono deste item específico
   observation String?
   additions   String?
+  
 
   // 🆕 CAMPOS DE PIZZA (alinhar com banco)
   flavors     String?
   border      String?
   extras      String?
+  promoApplied String?
 }
 
 
@@ -159,37 +161,42 @@ model User {
 // --- SISTEMA DE MARKETING E PROMOÇÕES ---
 
 model Promotion {
-  id          Int      @id @default(autoincrement())
-  name        String   // Ex: "Terça do Refri"
-  description String?  // Ex: "Ganhe um refri na compra de Pizza G"
-  active      Boolean  @default(true)
-  
-  // Dias da semana em que funciona (Ex: "1,2,5" para Seg, Ter, Sex)
-  daysOfWeek  String   
-  
-  // TIPO DA REGRA: 
-  // "DISCOUNT" (Desconto em % no segundo item)
-  // "FREE_ITEM" (Item grátis condicional)
-  // "FREE_BORDER" (Borda grátis)
-  type        String   
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?
+  active        Boolean  @default(true)
 
-  // GATILHO: O que o cliente tem que comprar?
-  // Pode ser uma Categoria (ex: "Pizzas") ou trecho do nome (ex: "GG")
-  triggerType  String  // "CATEGORY" ou "NAME_CONTAINS"
-  triggerValue String  // Ex: "Pizzas" ou "GG"
+  // Dias da semana (0=Dom,1=Seg...): "1,2,5"
+  daysOfWeek    String
 
-  // ALVO: O que ganha o desconto?
-  // Ex: "Borda", "Guarana", "Pizza P"
-  targetType   String  // "BORDER", "PRODUCT_NAME", "CATEGORY"
-  targetValue  String  // Ex: "Catupiry", "Guarana", "Pizzas"
+  // --- GATILHO (SE COMPRAR...) ---
+  triggerCategory String?      // nome da categoria (opcional)
+  triggerProductIds String?      // "1,2,3"
+  triggerOptionItemIds String?   // "10,11"
 
-  // VALOR DO BENEFÍCIO
-  // 100 = 100% OFF (Grátis), 50 = 50% OFF
-  discountPercent Float 
+  // --- RECOMPENSA (APLICA EM...) ---
+  // ITEM_FREE | DISCOUNT_PERCENT | FIXED_PRICE | OPTION_FREE
+  rewardType     String
+  rewardCategory String?
+  rewardProductIds String?       // "4,5"
+  rewardOptionItemIds String?    // "20,21"
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  discountPercent Float?
+  fixedPrice      Float?
+
+  // Quantidade máxima que recebe a recompensa (ex: 1 grátis)
+  maxRewardQty    Int     @default(1)
+
+  // Exibir no cardápio
+  showOnMenu      Boolean @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
+
+
+
 
 // Configurações Gerais da Loja (Banner, Avisos, etc)
 model StoreSettings {

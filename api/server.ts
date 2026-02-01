@@ -110,10 +110,13 @@ async function priceOneItem(prismaAny: any, payloadItem: any, dow: number) {
         throw new Error(`Opção indisponível: ${it.name}`)
       }
       pickedItems.push({
+        optionItemId: it.id,
+        groupId: g.id,
         groupTitle: g.title,
         name: it.name,
         price: Number(it.price || 0),
-        imageUrl: (it as any).imageUrl || null,
+        imageUrl: it.imageUrl || null,
+        
       })
     }
 
@@ -132,14 +135,328 @@ async function priceOneItem(prismaAny: any, payloadItem: any, dow: number) {
   const total = Number((unit * quantity).toFixed(2))
 
   return {
+    productId,
     product,
     quantity,
     unit,
     total,
     pickedItems,
+    appliedPromos: [],
     payloadObservation: payloadItem?.observation || '',
   }
 }
+
+// ================= PROMOÇÕES V2 (motor novo / IDs em CSV string) =================
+
+function promotionIsActiveTodayV2(promo: any, dow: number) {
+  const days = String(promo.daysOfWeek || '')
+    .split(',')
+    .map((s: string) => Number(s.trim()))
+    .filter((n) => !Number.isNaN(n))
+  return !!promo.active && days.includes(dow)
+}
+
+function csvToIntArray(v: any): number[] {
+  if (!v) return []
+  return String(v)
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => !Number.isNaN(n))
+}
+
+function itemMatchesTrigger(promo: any, ci: any) {
+  const triggerCategory = promo.triggerCategory ? String(promo.triggerCategory) : ''
+  const triggerProductIds = csvToIntArray(promo.triggerProductIds)
+  const triggerOptionItemIds = csvToIntArray(promo.triggerOptionItemIds)
+
+  const byCategory = triggerCategory ? String(ci.product.category) === triggerCategory : false
+  const byProduct = triggerProductIds.length ? triggerProductIds.includes(Number(ci.product.id)) : false
+  const okBase = byCategory || byProduct
+  if (!okBase) return false
+
+  if (triggerOptionItemIds.length) {
+    const selectedIds = new Set(
+      (ci.pickedItems || [])
+        .map((p: any) => Number(p.optionItemId))
+        .filter((n: number) => !Number.isNaN(n))
+    )
+    return triggerOptionItemIds.every((id: number) => selectedIds.has(id))
+  }
+
+  return true
+}
+
+function itemMatchesReward(promo: any, ci: any) {
+  const rewardCategory = promo.rewardCategory ? String(promo.rewardCategory) : ''
+  const rewardProductIds = csvToIntArray(promo.rewardProductIds)
+
+  if (rewardCategory && String(ci.product.category) === rewardCategory) return true
+  if (rewardProductIds.length && rewardProductIds.includes(Number(ci.product.id))) return true
+  return false
+}
+
+function cloneComputedItem(ci: any) {
+  return {
+    ...ci,
+    pickedItems: Array.isArray(ci.pickedItems) ? ci.pickedItems.map((p: any) => ({ ...p })) : [],
+    appliedPromos: Array.isArray(ci.appliedPromos) ? [...ci.appliedPromos] : [],
+  }
+}
+
+// Divide um item por quantidade (para 1 grátis e o resto pago)
+function splitItemByQty(ci: any, freeQty: number) {
+  const paidQty = Math.max(0, Number(ci.quantity) - freeQty)
+  const res: any[] = []
+
+  if (freeQty > 0) {
+    const free = cloneComputedItem(ci)
+    free.quantity = freeQty
+    free.unit = 0
+    free.total = 0
+    res.push(free)
+  }
+
+  if (paidQty > 0) {
+    const paid = cloneComputedItem(ci)
+    paid.quantity = paidQty
+    paid.total = Number((Number(paid.unit) * paidQty).toFixed(2))
+    res.push(paid)
+  }
+
+  return res
+}
+
+function applyItemFree(items: any[], promo: any) {
+  let remaining = Math.max(1, Number(promo.maxRewardQty || 1))
+  const out: any[] = []
+
+  for (const ci0 of items) {
+    const ci = cloneComputedItem(ci0)
+
+    if (!itemMatchesReward(promo, ci) || remaining <= 0) {
+      out.push(ci)
+      continue
+    }
+
+    const freeQty = Math.min(Number(ci.quantity), remaining)
+    const parts = splitItemByQty(ci, freeQty)
+
+    // marca promo no(s) itens grátis
+    if (freeQty > 0) {
+      parts[0].appliedPromos.push({
+        id: promo.id,
+        name: promo.name,
+        type: promo.rewardType,
+      })
+    }
+
+    out.push(...parts)
+    remaining -= freeQty
+  }
+
+  return out
+}
+
+function applyDiscountPercent(items: any[], promo: any) {
+  const pct = Math.max(0, Math.min(100, Number(promo.discountPercent || 0)))
+  const factor = (100 - pct) / 100
+
+  return items.map((ci0) => {
+    const ci = cloneComputedItem(ci0)
+    if (!itemMatchesReward(promo, ci)) return ci
+
+    const newUnit = Number((Number(ci.unit) * factor).toFixed(2))
+    ci.unit = newUnit
+    ci.total = Number((newUnit * Number(ci.quantity)).toFixed(2))
+    ci.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType })
+    return ci
+  })
+}
+
+function applyFixedPrice(items: any[], promo: any) {
+  const fixed = Number(promo.fixedPrice)
+  if (!Number.isFinite(fixed)) return items
+
+  return items.map((ci0) => {
+    const ci = cloneComputedItem(ci0)
+    if (!itemMatchesReward(promo, ci)) return ci
+
+    ci.unit = Number(fixed.toFixed(2))
+    ci.total = Number((ci.unit * Number(ci.quantity)).toFixed(2))
+    ci.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType })
+    return ci
+  })
+}
+
+// OPTION_FREE: subtrai o preço das opções selecionadas (ex: borda)
+function applyOptionFree(items: any[], promo: any) {
+  const rewardOptionIds = new Set(csvToIntArray(promo.rewardOptionItemIds))
+  if (!rewardOptionIds.size) return items
+
+  return items.map((ci0) => {
+    const ci = cloneComputedItem(ci0)
+    if (!ci.pickedItems || !ci.pickedItems.length) return ci
+
+    const discount = ci.pickedItems
+      .filter((p: any) => rewardOptionIds.has(Number(p.optionItemId)))
+      .reduce((acc: number, p: any) => acc + Number(p.price || 0), 0)
+
+    if (discount <= 0) return ci
+
+    const newUnit = Number(Math.max(0, Number(ci.unit) - discount).toFixed(2))
+    ci.unit = newUnit
+    ci.total = Number((newUnit * Number(ci.quantity)).toFixed(2))
+    ci.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType })
+    return ci
+  })
+}
+
+export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
+  const items = computedItems.map((it) => ({
+    ...it,
+    appliedPromos: Array.isArray(it.appliedPromos) ? it.appliedPromos : [],
+  }));
+
+  const qtyOfProduct = (productId: number) =>
+    items
+      .filter((x) => Number(x.productId) === Number(productId))
+      .reduce((acc, x) => acc + Number(x.quantity || 0), 0);
+
+  const triggerOk = (promo: any) => {
+    const triggerIds = parseCsvIds(promo.triggerProductIds);
+
+    if (triggerIds.length > 0) {
+      return triggerIds.some((id: number) => qtyOfProduct(id) > 0);
+    }
+
+    if (promo.triggerCategory) {
+      return items.some((it) => it.product?.category === promo.triggerCategory);
+    }
+
+    return false;
+  };
+
+  const promoTargetsItem = (promo: any, it: any) => {
+  // ❌ nunca aplicar recompensa no produto gatilho
+  const triggerIds = parseCsvIds(promo.triggerProductIds);
+
+  if (triggerIds.includes(Number(it.productId))) {
+    return false;
+  }
+
+  if (promo.triggerCategory && it.product?.category === promo.triggerCategory) {
+    // se rewardCategory for diferente, ok
+    if (!promo.rewardCategory) return false;
+    if (promo.rewardCategory === promo.triggerCategory) return false;
+  }
+
+  const rewardIds = parseCsvIds(promo.rewardProductIds);
+
+  const idMatch =
+    rewardIds.length > 0 && rewardIds.includes(Number(it.productId));
+
+  const catMatch =
+    promo.rewardCategory &&
+    it.product?.category === promo.rewardCategory;
+
+  return idMatch || catMatch;
+};
+
+
+  for (const promo of promosToday) {
+    if (!promo?.active) continue;
+    if (!triggerOk(promo)) continue;
+
+    const targets = items.filter((it) => promoTargetsItem(promo, it));
+    if (targets.length === 0) continue;
+
+    // DISCOUNT_PERCENT
+    if (promo.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(promo.discountPercent || 0);
+
+      for (const it of targets) {
+        const baseUnit = Number(it.unit || 0);
+        const newUnit = Number((baseUnit * (100 - pct) / 100).toFixed(2));
+        it.unit = newUnit;
+        it.total = Number((newUnit * Number(it.quantity || 1)).toFixed(2));
+        it.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType });
+      }
+      continue;
+    }
+
+    // FIXED_PRICE
+    if (promo.rewardType === "FIXED_PRICE") {
+      const fp = Number(promo.fixedPrice || 0);
+
+      for (const it of targets) {
+        it.unit = Number(fp.toFixed(2));
+        it.total = Number((it.unit * Number(it.quantity || 1)).toFixed(2));
+        it.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType });
+      }
+      continue;
+    }
+
+    // ITEM_FREE (1 grátis e o resto pago)
+    if (promo.rewardType === "ITEM_FREE") {
+      let remainingFree = Number(promo.maxRewardQty || 1);
+
+      const sortedTargets = [...targets].sort((a, b) => Number(a.unit || 0) - Number(b.unit || 0));
+
+      for (const it of sortedTargets) {
+        if (remainingFree <= 0) break;
+
+        const q = Number(it.quantity || 1);
+
+        if (q <= remainingFree) {
+          it.unit = 0;
+          it.total = 0;
+          it.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType, freeQty: q });
+          remainingFree -= q;
+        } else {
+          const freeQty = remainingFree;
+          const paidQty = q - freeQty;
+
+          const paidUnit = Number(it.unit || 0);
+
+          // item atual vira "pago"
+          it.quantity = paidQty;
+          it.total = Number((paidUnit * paidQty).toFixed(2));
+
+          // cria linha grátis separada
+          const freeLine = {
+            ...it,
+            quantity: freeQty,
+            unit: 0,
+            total: 0,
+            appliedPromos: [...it.appliedPromos, { id: promo.id, name: promo.name, type: promo.rewardType, freeQty }],
+          };
+
+          items.push(freeLine);
+          remainingFree = 0;
+        }
+      }
+      continue;
+    }
+
+    // OPTION_FREE deixamos para a próxima etapa
+  }
+
+  return items;
+}
+
+function parseCsvIds(v?: string | null): number[] {
+  if (!v) return [];
+  return String(v)
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => !Number.isNaN(n));
+}
+
+
+
+
+
+
 
 // 🔥 Helper: transforma pickedItems em strings (flavors / border / additions / extras)
 function buildItemStrings(pickedItems: any[]) {
@@ -1774,6 +2091,14 @@ app.post('/orders', async (request: any, reply: any) => {
   let computedItems: any[] = []
   try {
     computedItems = await Promise.all(items.map((it: any) => priceOneItem(prisma, it, dow)))
+    // --- aplica promoções V2 ---
+    const promosAll = await prisma.promotion.findMany({
+      where: { active: true },
+    });
+    const promosToday = promosAll.filter((p: any) => promotionIsActiveTodayV2(p, dow));
+
+    computedItems = applyPromotionsV2(computedItems, promosToday)
+
   } catch (e: any) {
     return reply.status(400).send({ error: e?.message || 'Erro ao calcular itens.' })
   }
@@ -1812,6 +2137,10 @@ app.post('/orders', async (request: any, reply: any) => {
             flavors,
             border,
             extras,
+            promoApplied: (ci.appliedPromos && ci.appliedPromos.length)
+              ? ci.appliedPromos.map((p:any)=>p.name).join(' | ')
+              : null,
+
           }
         }),
       },

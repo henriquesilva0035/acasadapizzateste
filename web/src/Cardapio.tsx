@@ -14,6 +14,9 @@ import { useCart } from "./contexts/CartContext";
 import { useOrder } from "./contexts/OrderContext";
 import ProductBuyModal from "./ProductBuyModal";
 import CartModal from "./contexts/CartModal";
+import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
+import { buildPromoText } from "./utils/promoText";
+
 
 // Tipagem
 type Product = {
@@ -41,6 +44,8 @@ const THEME = {
 };
 
 export default function Cardapio() {
+
+ 
   const navigate = useNavigate();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -64,6 +69,19 @@ export default function Cardapio() {
   const { order } = useOrder();
   const itemsCount = items.reduce((acc, it) => acc + (it.qty || 1), 0);
 
+  //Promoções do dia
+  const { promos } = usePromotionsToday();
+
+
+  //Nome por id
+
+  const productNameById = (id: number) => {
+    const prod = products.find((x: any) => x.id === id);
+    return prod?.name || `#${id}`;
+  };
+
+
+
   // Helpers
   const norm = (s?: string | null) => (s ?? "").trim();
   const normalizeCategory = (p: Product) => {
@@ -71,6 +89,8 @@ export default function Cardapio() {
     return c ? c : "Outros";
   };
 
+
+  
   // Carrega categorias (cadastro)
   useEffect(() => {
     (async () => {
@@ -231,6 +251,66 @@ export default function Cardapio() {
     // 4. Se não achou nada, mostra zero mesmo
     return { label: 'R$ 0.00', isPromo: false };
   }
+
+  function cartHasTrigger(promo: any, cartItems: any[]) {
+  const triggerIds = csvToIds(promo.triggerProductIds);
+
+  // Se promo foi por produtos específicos:
+  if (triggerIds.length > 0) {
+    return cartItems.some((it: any) => triggerIds.includes(Number(it.productId || it.id)));
+  }
+
+  // Se foi por categoria:
+  if (promo.triggerCategory) {
+    return cartItems.some((it: any) => {
+      const prod = products.find((p) => p.id === Number(it.productId || it.id));
+      return prod?.category === promo.triggerCategory;
+    });
+  }
+
+  return false;
+}
+
+function promoTargetsProduct(promo: any, product: any) {
+  const rewardIds = csvToIds(promo.rewardProductIds);
+
+  if (rewardIds.length > 0) return rewardIds.includes(product.id);
+  if (promo.rewardCategory) return promo.rewardCategory === product.category;
+
+  return false;
+}
+
+function computePriceWithActivePromos(product: any, base: number, promosToday: any[], cartItems: any[]) {
+  let price = base;
+  let appliedLabel: string | null = null;
+
+  for (const pr of promosToday) {
+    if (!promoTargetsProduct(pr, product)) continue;
+    if (!cartHasTrigger(pr, cartItems)) continue; // só ativa se gatilho no carrinho
+
+    if (pr.rewardType === "DISCOUNT_PERCENT") {
+      const pct = Number(pr.discountPercent || 0);
+      const factor = (100 - pct) / 100;
+      price = Number((price * factor).toFixed(2));
+      appliedLabel = `✅ Desconto ativado (${pct}% OFF)`;
+    }
+
+    if (pr.rewardType === "FIXED_PRICE") {
+      const fp = Number(pr.fixedPrice || 0);
+      price = Number(fp.toFixed(2));
+      appliedLabel = `✅ Preço fixo ativado`;
+    }
+
+    if (pr.rewardType === "ITEM_FREE") {
+      appliedLabel = `✅ Grátis ao finalizar (se cumprir a regra)`;
+      // preço do cardápio não vira 0 aqui, porque pode ser "1 grátis e o resto pago"
+      // quem garante o grátis de verdade é o backend no pedido
+    }
+  }
+
+  return { price, appliedLabel };
+}
+
 
 
 
@@ -423,6 +503,21 @@ export default function Cardapio() {
           filteredProducts.map((p) => {
             // ✅ Chama a função nova para decidir o preço
             const priceInfo = getDisplayPrice(p);
+            const basePrice = Number(p.price || 0);
+
+            // se o produto tem promoPrice próprio (antigo), mantém como está
+            const isBasePromo = !!priceInfo.isPromo;
+
+            // só calcula promo dinâmica se NÃO for promoPrice antigo
+            let dynamicLabel: string | null = null;
+            let dynamicPrice: number | null = null;
+
+            if (!isBasePromo && basePrice > 0) {
+              const dyn = computePriceWithActivePromos(p, basePrice, promos || [], items || []);
+              dynamicLabel = dyn.appliedLabel;
+              dynamicPrice = dyn.price !== basePrice ? dyn.price : null;
+            }
+
 
             return (
               <div
@@ -460,44 +555,107 @@ export default function Cardapio() {
                     }}
                   >
                     {p.description || "Sem descrição"}
-                  </div>
+                  </div>  
 
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                    {/* PREÇO INTELIGENTE (Mostra valor ou "A partir de") */}
-                    <span
-                      style={{
-                        color: priceInfo.isPromo ? THEME.green : THEME.dark,
-                        fontWeight: 900,
-                        fontSize: 16,
-                      }}
-                    >
-                      {priceInfo.label}
-                    </span>
+                      {/* LINHA DO PREÇO */}
+<div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+  <span
+    style={{
+      color: dynamicPrice !== null ? THEME.green : priceInfo.isPromo ? THEME.green : THEME.dark,
+      fontWeight: 900,
+      fontSize: 16,
+    }}
+  >
+    {dynamicPrice !== null ? `R$ ${dynamicPrice.toFixed(2)}` : priceInfo.label}
+  </span>
 
-                    {/* PREÇO ORIGINAL RISCADO (SÓ SE FOR PROMO) */}
-                    {priceInfo.isPromo && priceInfo.original && priceInfo.original > 0 && (
-                      <span style={{ textDecoration: "line-through", color: "#bbb", fontSize: 12 }}>
-                        R$ {Number(priceInfo.original).toFixed(2)}
-                      </span>
-                    )}
+  {/* preço original riscado quando promo dinâmica ativar */}
+  {dynamicPrice !== null && (
+    <span style={{ textDecoration: "line-through", color: "#bbb", fontSize: 12 }}>
+      R$ {basePrice.toFixed(2)}
+    </span>
+  )}
 
-                    {/* ETIQUETA DE PROMOÇÃO */}
-                    {priceInfo.isPromo && (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          fontSize: 11,
-                          fontWeight: 900,
-                          color: THEME.dark,
-                          background: "rgba(242,183,5,0.22)",
-                          padding: "3px 8px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        PROMO
-                      </span>
-                    )}
-                  </div>
+  {/* preço original riscado quando for promoPrice antigo */}
+  {priceInfo.isPromo && priceInfo.original && priceInfo.original > 0 && (
+    <span style={{ textDecoration: "line-through", color: "#bbb", fontSize: 12 }}>
+      R$ {Number(priceInfo.original).toFixed(2)}
+    </span>
+  )}
+
+  {/* etiqueta PROMO só do promoPrice antigo */}
+  {priceInfo.isPromo && (
+    <span
+      style={{
+        marginLeft: 6,
+        fontSize: 11,
+        fontWeight: 900,
+        color: THEME.dark,
+        background: "rgba(242,183,5,0.22)",
+        padding: "3px 8px",
+        borderRadius: 999,
+      }}
+    >
+      PROMO
+    </span>
+  )}
+</div>
+
+{/* ✅ LABEL “ATIVADO” (CAMADA 2) */}
+{dynamicLabel && (
+  <div style={{ marginTop: 6, fontSize: 12, fontWeight: 900, color: THEME.green }}>
+    {dynamicLabel}
+  </div>
+)}
+
+{/* ✅ MENSAGENS DE PROMOÇÃO DO DIA (CAMADA 1) */}
+{(() => {
+  const promosForProduct = (promos || []).filter((pr: any) => {
+    if (!pr?.showOnMenu) return false;
+
+    const rewardIds = csvToIds(pr.rewardProductIds);
+    const triggerIds = csvToIds(pr.triggerProductIds);
+
+    const isReward =
+      rewardIds.includes(p.id) ||
+      (pr.rewardCategory && pr.rewardCategory === p.category);
+
+    const isTrigger =
+      triggerIds.includes(p.id) ||
+      (pr.triggerCategory && pr.triggerCategory === p.category);
+
+    return isReward || isTrigger;
+  });
+
+  if (promosForProduct.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+      {promosForProduct.slice(0, 2).map((pr: any) => (
+        <div
+          key={pr.id}
+          style={{
+            fontSize: 12,
+            fontWeight: 800,
+            color: THEME.green,
+            background: "rgba(0,184,148,0.10)",
+            padding: "6px 10px",
+            borderRadius: 10,
+            border: "1px solid rgba(0,184,148,0.18)",
+            width: "fit-content",
+            maxWidth: "100%",
+          }}
+        >
+          🔥 {buildPromoText(pr, productNameById)}
+        </div>
+      ))}
+    </div>
+  );
+})()}
+
+
+
+                  
                 </div>
 
                 <div
