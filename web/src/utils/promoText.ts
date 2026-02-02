@@ -34,3 +34,40 @@ export function buildPromoText(p: Promo, productNameById: (id: number) => string
 
   return `Promoção: ${p.name}`;
 }
+
+type CartItemLike = { productId: number | string };
+
+export function isRewardPromoActiveForProduct(opts: {
+  promo: Promo;
+  productId: number;
+  cartItems: CartItemLike[];
+}) {
+  const rewardIds = csvToIds(opts.promo.rewardProductIds);
+  const triggerIds = csvToIds(opts.promo.triggerProductIds);
+
+  // só vale se o produto for recompensa por ID
+  if (rewardIds.length === 0 || !rewardIds.includes(opts.productId)) {
+    return false;
+  }
+
+  // precisa ter gatilho por ID
+  if (triggerIds.length === 0) return false;
+
+  return opts.cartItems.some((it) =>
+    triggerIds.includes(Number(it.productId))
+  );
+}
+
+export function isTriggerProductInCart(opts: {
+  promo: Promo;
+  productId: number;
+  cartItems: CartItemLike[];
+}) {
+  const triggerIds = csvToIds(opts.promo.triggerProductIds);
+  if (triggerIds.length === 0) return false;
+
+  return (
+    triggerIds.includes(opts.productId) &&
+    opts.cartItems.some((it) => Number(it.productId) === opts.productId)
+  );
+}

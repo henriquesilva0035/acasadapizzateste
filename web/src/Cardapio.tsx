@@ -15,7 +15,8 @@ import { useOrder } from "./contexts/OrderContext";
 import ProductBuyModal from "./ProductBuyModal";
 import CartModal from "./contexts/CartModal";
 import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
-import { buildPromoText } from "./utils/promoText";
+import { buildPromoText, isRewardPromoActiveForProduct, isTriggerProductInCart } from "./utils/promoText";
+
 
 
 // Tipagem
@@ -835,12 +836,12 @@ function computePriceWithActivePromos(product: any, base: number, promosToday: a
     const triggerIds = csvToIds(pr.triggerProductIds);
 
     const isReward =
-      rewardIds.includes(p.id) ||
-      (pr.rewardCategory && pr.rewardCategory === p.category);
+  (rewardIds.length > 0 && rewardIds.includes(p.id)) ||
+  (rewardIds.length === 0 && pr.rewardCategory && pr.rewardCategory === p.category);
 
     const isTrigger =
-      triggerIds.includes(p.id) ||
-      (pr.triggerCategory && pr.triggerCategory === p.category);
+  (triggerIds.length > 0 && triggerIds.includes(p.id)) ||
+  (triggerIds.length === 0 && pr.triggerCategory && pr.triggerCategory === p.category);
 
     return isReward || isTrigger;
   });
@@ -855,29 +856,57 @@ function computePriceWithActivePromos(product: any, base: number, promosToday: a
 
 
 
-  return (
-    <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
-      {promosForProduct.slice(0, 2).map((pr: any) => (
-        <div
-          key={pr.id}
-          style={{
-            fontSize: 12,
-            fontWeight: 800,
-            color: THEME.green,
-            background: "rgba(0,184,148,0.10)",
-            padding: "6px 10px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,184,148,0.18)",
-            width: "fit-content",
-            maxWidth: "100%",
-          }}
-        >
-          🔥 {buildPromoText(pr, productNameById)}
-        </div>
-      ))}
-    </div>
-  );
-})()}
+                return (
+                  <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+
+                      {promosForProduct.slice(0, 2).map((pr: any) => {
+                          const rewardActive = isRewardPromoActiveForProduct({
+                            promo: pr,
+                            productId: p.id,
+                            cartItems: items || [],
+                          });
+
+                          const triggerActive = isTriggerProductInCart({
+                            promo: pr,
+                            productId: p.id,
+                            cartItems: items || [],
+                          });
+
+                          // se for recompensa e já tem gatilho no carrinho -> troca texto
+                          const text = rewardActive
+                            ? `🔥 Promo ativada — agora sai por ${dynamicPrice !== null ? `R$ ${dynamicPrice.toFixed(2)}` : "preço com desconto"}`
+                            : `🔥 ${buildPromoText(pr, productNameById)}`;
+
+
+                          // se for o gatilho, você pode mostrar que ele “ativou” a promo (opcional)
+                          const extra = triggerActive ? " ✅ (você ativou essa promoção)" : "";
+
+                          return (
+                            <div
+                              key={pr.id}
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 800,
+                                color: THEME.green,
+                                background: "rgba(0,184,148,0.10)",
+                                padding: "6px 10px",
+                                borderRadius: 10,
+                                border: "1px solid rgba(0,184,148,0.18)",
+                                width: "fit-content",
+                                maxWidth: "100%",
+                              }}
+                            >
+                              {text}
+                              {extra}
+                            </div>
+                          );
+                        })}
+
+
+
+                  </div>
+                );
+              })()}
 
 
 
