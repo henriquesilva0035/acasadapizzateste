@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./lib/api";
-import { useCart } from "./contexts/CartContext";
-import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
+
+import { useCart } from "./contexts/CartContext"; // ou "../contexts/CartContext" dependendo do caminho
+import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday"; // ajuste caminho
 
 // --- TIPOS ---
 type ChargeMode = "SUM" | "MAX" | "MIN";
@@ -94,6 +95,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   const [loading, setLoading] = useState(false);
 
   const { promos } = usePromotionsToday();
+  const { items: cartItems } = useCart();
   const { addItem, items } = useCart();
 
   // ✅ Map p/ descobrir categoria dos itens do carrinho (necessário p/ triggerCategory)
@@ -184,28 +186,23 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   /**
    * =========================================================
    * ✅ PROMO: OPÇÕES (sabores/bordas)
-   *
-   * Regra:
-   * - Só muda preço da opção se ela estiver em rewardOptionItemIds
-   * - Assim: promo “G/GG -> P 50%” NÃO mexe em opções do GG
    * =========================================================
    */
 
   // (opcional) se você usa triggerCategory/triggerProductIds para “marcar” onde a promo de opção aparece
   function promoAppliesToProduct(pr: any, prod: Product) {
-  const triggerIds = csvToIds(pr.triggerProductIds);
+    const triggerIds = csvToIds(pr.triggerProductIds);
 
-  if (triggerIds.length > 0) {
-    return triggerIds.includes(Number(prod.id));
+    if (triggerIds.length > 0) {
+      return triggerIds.includes(Number(prod.id));
+    }
+
+    if (pr.triggerCategory) {
+      return String(pr.triggerCategory) === String(prod.category);
+    }
+
+    return false;
   }
-
-  if (pr.triggerCategory) {
-    return String(pr.triggerCategory) === String(prod.category);
-  }
-
-  return false;
-}
-
 
   function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
     const original = Number(optionItem.price || 0);
@@ -231,7 +228,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       if (pr.rewardType === "DISCOUNT_PERCENT") {
         const pct = Number(pr.discountPercent || 0);
         if (pct > 0 && pct <= 100) {
-          const np = Number((original * (100 - pct) / 100).toFixed(2));
+          const np = Number(((original * (100 - pct)) / 100).toFixed(2));
           best = Math.min(best, np);
         }
         continue;
@@ -244,31 +241,62 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   /**
    * =========================================================
    * ✅ PROMO: BASE DO PRODUTO (ex: P com 50% OFF)
-   *
-   * - O cardápio mostra 15 certo porque aplica promo dinâmica
-   * - O modal precisa aplicar também (pra salvar unitPrice correto)
    * =========================================================
    */
-  
 
-  function cartHasTrigger(promo: any, cartItems: any[]) {
-  const triggerIds = csvToIds(promo.triggerProductIds);
+  function cartHasTrigger(promo: any, cartItemsArg: any[]) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
 
-  // ✅ PRIORIDADE TOTAL para IDs
-  if (triggerIds.length > 0) {
-    return cartItems.some(it => triggerIds.includes(Number(it.productId)));
+    // ✅ PRIORIDADE TOTAL para IDs
+    if (triggerIds.length > 0) {
+      return cartItemsArg.some((it) => triggerIds.includes(Number(it.productId)));
+    }
+
+    // só usa categoria se NÃO houver IDs
+    if (promo.triggerCategory) {
+      return cartItemsArg.some((it) => String(it.productCategory) === String(promo.triggerCategory));
+    }
+
+    return false;
   }
 
-  // só usa categoria se NÃO houver IDs
-  if (promo.triggerCategory) {
-    return cartItems.some(it =>
-      String(it.productCategory) === String(promo.triggerCategory)
-    );
+  // ✅ NOVO: considera o produto ATUAL como gatilho também (pra aparecer grátis no modal mesmo com carrinho vazio)
+  function productIsTriggerNow(promo: any, prod: any) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
+
+    // ✅ prioridade total pra IDs
+    if (triggerIds.length > 0) {
+      return triggerIds.includes(Number(prod?.id));
+    }
+
+    // fallback categoria só se não tiver IDs
+    if (promo.triggerCategory) {
+      return String(prod?.category) === String(promo.triggerCategory);
+    }
+
+    return false;
   }
 
-  return false;
-}
+  function getOptionAdjustedPrice(optionItem: any, prod: any) {
+    const base = Number(optionItem?.price || 0);
 
+    // ✅ borda grátis (OPTION_FREE)
+    for (const pr of promos || []) {
+      if (!pr?.active) continue;
+      if (pr.rewardType !== "OPTION_FREE") continue;
+
+      // ✅ ativa se já tem gatilho no carrinho OU se o produto atual é o gatilho
+      const promoActive = cartHasTrigger(pr, cartItems || []) || productIsTriggerNow(pr, prod);
+      if (!promoActive) continue;
+
+      const freeIds = csvToIds(pr.rewardOptionItemIds || pr.triggerOptionItemIds);
+      if (freeIds.includes(Number(optionItem.id))) {
+        return 0; // ✅ grátis
+      }
+    }
+
+    return base;
+  }
 
   function productIsReward(promo: any, prod: Product) {
     const rewardIds = csvToIds(promo.rewardProductIds);
@@ -280,23 +308,22 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   }
 
   function productIsTrigger(promo: any, prod: Product) {
-  const triggerIds = csvToIds(promo.triggerProductIds);
+    const triggerIds = csvToIds(promo.triggerProductIds);
 
-  // ✅ se tem ID, IGNORA categoria completamente
-  if (triggerIds.length > 0) {
-    return triggerIds.includes(Number(prod.id));
+    // ✅ se tem ID, IGNORA categoria completamente
+    if (triggerIds.length > 0) {
+      return triggerIds.includes(Number(prod.id));
+    }
+
+    // só usa categoria se não tiver IDs
+    if (promo.triggerCategory) {
+      return String(prod.category) === String(promo.triggerCategory);
+    }
+
+    return false;
   }
 
-  // só usa categoria se não tiver IDs
-  if (promo.triggerCategory) {
-    return String(prod.category) === String(promo.triggerCategory);
-  }
-
-  return false;
-}
-
-
-  function applyDynamicProductPromos(prod: Product, base: number, cartItems: any[]) {
+  function applyDynamicProductPromos(prod: Product, base: number, cartItemsArg: any[]) {
     let best = base;
 
     for (const pr of promos || []) {
@@ -306,7 +333,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       if (pr.rewardType !== "DISCOUNT_PERCENT") continue;
 
       // precisa existir gatilho no carrinho (G/GG)
-      if (!cartHasTrigger(pr, cartItems)) continue;
+      if (!cartHasTrigger(pr, cartItemsArg)) continue;
 
       // produto atual tem que ser recompensa
       if (!productIsReward(pr, prod)) continue;
@@ -316,7 +343,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
       const pct = Number(pr.discountPercent || 0);
       if (pct > 0 && pct <= 100) {
-        const np = Number((base * (100 - pct) / 100).toFixed(2));
+        const np = Number(((base * (100 - pct)) / 100).toFixed(2));
         best = Math.min(best, np);
       }
     }
@@ -326,18 +353,17 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
   // ✅ cálculo de preço/validação
   const calc = useMemo(() => {
-    if (!product) return { addons: 0, total: 0, unit: 0, unitRaw: 0, base: 0, errors: [], optionSummary: "" };
+    if (!product) return { addons: 0, total: 0, unit: 0, unitRaw: 0, base: 0, errors: [] as string[], optionSummary: "" };
 
     const errors: string[] = [];
     let addons = 0;
 
-// 1) base normal ou promo fixa do produto (promoPrice/promoDays)
-const promoOn = isPromoActive(product);
-const baseRaw = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
+    // 1) base normal ou promo fixa do produto (promoPrice/promoDays)
+    const promoOn = isPromoActive(product);
+    const baseRaw = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
 
-// 2) ✅ aplica promo dinâmica APENAS pra exibir (não salvar no carrinho)
-const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
-
+    // 2) ✅ aplica promo dinâmica APENAS pra exibir (não salvar no carrinho)
+    const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
 
     const summaryParts: string[] = [];
 
@@ -353,8 +379,8 @@ const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
 
       if (picks.length) summaryParts.push(`${g.title}: ${picks.map((x) => x.name).join(", ")}`);
 
-      // ✅ preço das opções com promo (somente se rewardOptionItemIds bater)
-      const prices = picks.map((op) => getAdjustedOptionPrice(op, product));
+      // ✅ preço das opções (borda grátis via OPTION_FREE)
+      const prices = picks.map((op) => getOptionAdjustedPrice(op, product));
       const mode = String(g.chargeMode || "SUM").toUpperCase();
 
       if (prices.length) {
@@ -365,20 +391,19 @@ const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
     }
 
     const unitDisplay = Number((baseDisplay + addons).toFixed(2));
-const unitRaw = Number((baseRaw + addons).toFixed(2));
-const total = Number((unitDisplay * Math.max(1, qty)).toFixed(2));
+    const unitRaw = Number((baseRaw + addons).toFixed(2));
+    const total = Number((unitDisplay * Math.max(1, qty)).toFixed(2));
 
-return {
-  addons,
-  base: baseDisplay,
-  unit: unitDisplay,
-  unitRaw,
-  total,
-  errors,
-  optionSummary: summaryParts.join(" | "),
-};
-
-  }, [product, selected, qty, promos, items, prodMeta]);
+    return {
+      addons,
+      base: baseDisplay,
+      unit: unitDisplay,
+      unitRaw,
+      total,
+      errors,
+      optionSummary: summaryParts.join(" | "),
+    };
+  }, [product, selected, qty, promos, items, prodMeta, cartItems]);
 
   if (!open) return null;
 
@@ -631,14 +656,18 @@ return {
                                     const original = Number(it.price || 0);
                                     if (original <= 0) return null;
 
-                                    const adj = product ? getAdjustedOptionPrice(it, product) : original;
+                                    const adj = product ? getOptionAdjustedPrice(it, product) : original;
                                     const changed = adj !== original;
 
                                     return (
                                       <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                        <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>+ R$ {adj.toFixed(2)}</div>
+                                        {adj === 0 ? (
+                                          <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>GRÁTIS</div>
+                                        ) : (
+                                          <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>+ R$ {adj.toFixed(2)}</div>
+                                        )}
 
-                                        {changed && (
+                                        {changed && adj > 0 && (
                                           <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>+ R$ {original.toFixed(2)}</div>
                                         )}
 
