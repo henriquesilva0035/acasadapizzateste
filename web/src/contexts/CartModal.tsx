@@ -246,13 +246,11 @@ function getAdjustedOptionPrice(optionItem: any, prod: any, cartLines?: any[]) {
 
 
 function computeUnitFromProductAndOptions(cartItem: any) {
-  // ✅ SEMPRE prefira o valor salvo no carrinho (já veio com promo aplicada no modal)
   const saved = Number(cartItem.unitPrice ?? 0);
-  if (saved > 0) return saved;
 
-  // fallback só pra itens antigos que não tinham unitPrice
+  // fallback / validação usando produto + opções
   const prod = getProductById(Number(cartItem.productId));
-  if (!prod) return 0;
+  if (!prod) return saved > 0 ? saved : 0;
 
   const base = isProductPromoActive(prod)
     ? moneyToNumber(prod.promoPrice)
@@ -270,7 +268,6 @@ function computeUnitFromProductAndOptions(cartItem: any) {
     if (!selectedInGroup.length) continue;
 
     const prices = selectedInGroup.map((it: any) => getAdjustedOptionPrice(it, prod, items));
-
     const mode = String(g.chargeMode || "SUM").toUpperCase();
 
     let groupAdd = 0;
@@ -281,7 +278,14 @@ function computeUnitFromProductAndOptions(cartItem: any) {
     addons += groupAdd;
   }
 
-  return Number((base + addons).toFixed(2));
+  const computed = Number((base + addons).toFixed(2));
+
+  // ✅ se o carrinho já tem unitPrice salvo (RAW), usamos.
+  // Se estiver diferente (carrinhos antigos onde unitPrice já veio "com promo"),
+  // preferimos o recomputado pra evitar "desconto em cima de desconto".
+  if (saved > 0 && Math.abs(saved - computed) < 0.01) return saved;
+
+  return computed;
 }
 
 
@@ -314,11 +318,13 @@ function cartHasTrigger(promo: any, cartItems: any[]) {
 function cartItemIsTrigger(promo: any, cartItem: any) {
   const pid = Number(cartItem.productId);
 
-  // trigger por produto
+  // ✅ prioridade total pra gatilho por produto (IDs)
   const triggerIds = csvToIds(promo.triggerProductIds);
-  if (triggerIds.includes(pid)) return true;
+  if (triggerIds.length > 0) {
+    return triggerIds.includes(pid);
+  }
 
-  // trigger por categoria
+  // fallback: gatilho por categoria só quando NÃO houver IDs
   if (promo.triggerCategory) {
     const prod = getProductById(pid);
     if (prod && String(prod.category) === String(promo.triggerCategory)) {

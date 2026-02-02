@@ -77,7 +77,7 @@ function computeCartSubtotalWithPromos() {
 
   const lines = items.map((it: any) => ({ ...it }));
 
-  const baseUnit = (it: any) => Number(it.unitPrice ?? it.price ?? 0);
+  const baseUnit = (it: any) => Number(it.unitPrice || 0);
 
   // total base
   for (const it of lines) {
@@ -302,10 +302,65 @@ const dynamicTotal = computeCartSubtotalWithPromos();
 
   function promoAppliesToProduct(pr: any, product: any) {
   const triggerIds = csvToIds(pr.triggerProductIds);
-  const byId = triggerIds.length ? triggerIds.includes(Number(product.id)) : false;
-  const byCat = pr.triggerCategory ? pr.triggerCategory === product.category : false;
-  return byId || byCat;
+
+  // ✅ se tiver IDs, ignora categoria (evita promo “vazar” pra todas as pizzas)
+  if (triggerIds.length > 0) {
+    return triggerIds.includes(Number(product.id));
+  }
+
+  // fallback por categoria só quando não houver IDs
+  if (pr.triggerCategory) {
+    return String(pr.triggerCategory) === String(product.category);
+  }
+
+  return false;
 }
+
+function getProductByIdFromList(list: any[], id: number) {
+  return (list || []).find((p: any) => Number(p.id) === Number(id));
+}
+
+function computeUnitFromProductAndOptions(
+  productsList: any[],
+  cartItem: any,
+  getAdjustedOptionPriceFn: (opt: any, prod: any) => number
+) {
+  const prod = getProductByIdFromList(productsList, Number(cartItem.productId));
+  if (!prod) return Number(cartItem.unitPrice ?? cartItem.price ?? 0);
+
+  const base = Number(prod.price || 0);
+
+  const selectedIds = (cartItem.optionIds || cartItem.optionItemIds || []).map(Number);
+  const selectedSet = new Set(selectedIds);
+
+  let addons = 0;
+
+  for (const g of prod.optionGroups || []) {
+    if (g.available === false) continue;
+
+    const selectedInGroup = (g.items || []).filter((it: any) => selectedSet.has(Number(it.id)));
+    if (!selectedInGroup.length) continue;
+
+    const prices = selectedInGroup.map((it: any) => getAdjustedOptionPriceFn(it, prod));
+    const mode = String(g.chargeMode || "SUM").toUpperCase();
+
+    let groupAdd = 0;
+    if (mode === "MAX") groupAdd = Math.max(...prices);
+    else if (mode === "MIN") groupAdd = Math.min(...prices);
+    else groupAdd = prices.reduce((a: number, b: number) => a + b, 0);
+
+    addons += groupAdd;
+  }
+
+  return Number((base + addons).toFixed(2));
+}
+
+
+
+
+
+
+
 
 function getAdjustedOptionPrice(optionItem: any, product: any) {
   const original = Number(optionItem.price || 0);
@@ -425,14 +480,23 @@ if (otherPrices.length > 0) {
 
 }
 
-function promoTargetsProduct(promo: any, product: any) {
+function promoTargetsProduct(p: any, promo: any) {
   const rewardIds = csvToIds(promo.rewardProductIds);
+  const triggerIds = csvToIds(promo.triggerProductIds);
 
-  if (rewardIds.length > 0) return rewardIds.includes(product.id);
-  if (promo.rewardCategory) return promo.rewardCategory === product.category;
+  // ❌ nunca aplicar recompensa no produto gatilho
+  if (triggerIds.includes(Number(p.id))) return false;
 
-  return false;
+  const isRewardById = rewardIds.length ? rewardIds.includes(Number(p.id)) : false;
+
+  // ⚠️ categoria é perigosa quando triggerCategory == rewardCategory
+  // então só usa categoria se NÃO tiver rewardIds (ou você pode manter, mas com cuidado)
+  const isRewardByCategory =
+    !rewardIds.length && promo.rewardCategory && promo.rewardCategory === p.category;
+
+  return isRewardById || isRewardByCategory;
 }
+
 
 function computePriceWithActivePromos(product: any, base: number, promosToday: any[], cartItems: any[]) {
   let price = base;

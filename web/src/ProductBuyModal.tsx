@@ -326,17 +326,18 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
   // ✅ cálculo de preço/validação
   const calc = useMemo(() => {
-    if (!product) return { addons: 0, total: 0, unit: 0, base: 0, errors: [], optionSummary: "" };
+    if (!product) return { addons: 0, total: 0, unit: 0, unitRaw: 0, base: 0, errors: [], optionSummary: "" };
 
     const errors: string[] = [];
     let addons = 0;
 
-    // 1) base normal ou promo fixa do produto (promoPrice/promoDays)
-    const promoOn = isPromoActive(product);
-    let base = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
+// 1) base normal ou promo fixa do produto (promoPrice/promoDays)
+const promoOn = isPromoActive(product);
+const baseRaw = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
 
-    // 2) ✅ aplica promo dinâmica (ex: 50% OFF na P quando há GG/G no carrinho)
-    base = applyDynamicProductPromos(product, base, items || []);
+// 2) ✅ aplica promo dinâmica APENAS pra exibir (não salvar no carrinho)
+const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
+
 
     const summaryParts: string[] = [];
 
@@ -363,10 +364,20 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       }
     }
 
-    const unit = Number((base + addons).toFixed(2));
-    const total = Number((unit * Math.max(1, qty)).toFixed(2));
+    const unitDisplay = Number((baseDisplay + addons).toFixed(2));
+const unitRaw = Number((baseRaw + addons).toFixed(2));
+const total = Number((unitDisplay * Math.max(1, qty)).toFixed(2));
 
-    return { addons, base, unit, total, errors, optionSummary: summaryParts.join(" | ") };
+return {
+  addons,
+  base: baseDisplay,
+  unit: unitDisplay,
+  unitRaw,
+  total,
+  errors,
+  optionSummary: summaryParts.join(" | "),
+};
+
   }, [product, selected, qty, promos, items, prodMeta]);
 
   if (!open) return null;
@@ -404,12 +415,12 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       return;
     }
 
-    // ✅ unitPrice já sai com promo dinâmica aplicada, então o carrinho vai mostrar certo
+    // ✅ salvamos SEM promo dinâmica (o carrinho aplica ao exibir)
     addItem(
       {
         productId: product.id,
         name: product.name,
-        unitPrice: calc.unit,
+        unitPrice: calc.unitRaw,
         notes: obs,
         productCategory: product.category ?? null,
         optionSummary: calc.optionSummary,
