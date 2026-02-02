@@ -48,6 +48,7 @@ export default function AdminMarketing() {
   const [promocoes, setPromocoes] = useState<any[]>([]);
   const [produtos, setProdutos] = useState<any[]>([]);
   const [categorias, setCategorias] = useState<string[]>([]);
+  const [freeBorderKeys, setFreeBorderKeys] = useState<string[]>([]);
 
   // --- NOVA PROMO ---
   const [nomePromo, setNomePromo] = useState("");
@@ -96,6 +97,12 @@ export default function AdminMarketing() {
     else setLista([...listaAtual, id]);
   }
 
+  function toggleKey(listaAtual: string[], setLista: any, key: string) {
+  if (listaAtual.includes(key)) setLista(listaAtual.filter((x) => x !== key));
+  else setLista([...listaAtual, key]);
+}
+
+
   // quando troca gatilho, se ficar com 1 produto selecionado mantém sabores, senão limpa
   useEffect(() => {
     if (produtosGatilhoSelecionados.length !== 1) {
@@ -116,6 +123,42 @@ export default function AdminMarketing() {
     const id = produtosGatilhoSelecionados[0];
     return produtos.find((p) => Number(p.id) === Number(id)) || null;
   }, [produtos, produtosGatilhoSelecionados]);
+
+ // ✅ bordas únicas por NOME (com todos os IDs daquele nome)
+const borderItems = useMemo(() => {
+  const map = new Map<string, { key: string; name: string; ids: number[] }>();
+
+  const norm = (s: any) => String(s || "").trim().toLowerCase();
+
+  for (const p of (produtos || [])) {
+    for (const g of (p.optionGroups || [])) {
+      const title = String(g.title || "").toLowerCase();
+      if (!title.includes("borda")) continue;
+
+      for (const it of (g.items || [])) {
+        const name = String(it.name || "").trim();
+        if (!name) continue;
+
+        const key = norm(name);
+        const id = Number(it.id);
+
+        if (!map.has(key)) {
+          map.set(key, { key, name, ids: [id] });
+        } else {
+          const obj = map.get(key)!;
+          if (!obj.ids.includes(id)) obj.ids.push(id);
+        }
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}, [produtos]);
+
+
+  
+
+
 
   const triggerFlavorItems = useMemo(() => {
     if (!triggerSingleProduct?.optionGroups) return [];
@@ -142,14 +185,36 @@ export default function AdminMarketing() {
       if (!(precoFixo >= 0)) return alert("Informe um preço fixo válido.");
     }
 
-    // valida reward
-    if (rewardType === "OPTION_FREE") {
-      if (!textoBordas.trim()) return alert("Digite as bordas grátis!");
-      return alert("OPTION_FREE ainda vamos ligar por ID da borda (rapidinho depois).");
-    }
+  // valida reward
+if (rewardType === "OPTION_FREE") {
+  if (freeBorderKeys.length === 0) {
+    alert("Selecione pelo menos 1 borda grátis.");
+    return;
+  }
+  
+
+}
+
+
+
+
+
+
+
 
     // regra: se for FIXED_PRICE ou DISCOUNT e você não escolheu recompensa,
     // automaticamente aplica NO MESMO PRODUTO do gatilho (quando tiver produto marcado).
+
+    const selectedBorderIds =
+    rewardType === "OPTION_FREE"
+    ? borderItems
+        .filter((b: any) => freeBorderKeys.includes(b.key))
+        .flatMap((b: any) => b.ids)
+    : [];
+
+
+
+
     const autoUseTriggerAsReward =
       (rewardType === "FIXED_PRICE" || rewardType === "DISCOUNT_PERCENT") &&
       produtosRecompensaSelecionados.length === 0 &&
@@ -164,7 +229,9 @@ export default function AdminMarketing() {
       // gatilho
       triggerCategory: catGatilho || undefined,
       triggerProductIds: produtosGatilhoSelecionados.length ? produtosGatilhoSelecionados : undefined,
-      triggerOptionItemIds: triggerOptionItemIds.length ? triggerOptionItemIds : undefined,
+      rewardOptionItemIds: rewardType === "OPTION_FREE"
+  ? (selectedBorderIds.length ? selectedBorderIds : undefined)
+  : undefined,
 
       // reward
       rewardType,
@@ -481,28 +548,54 @@ export default function AdminMarketing() {
               )}
 
               {rewardType === "OPTION_FREE" && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, color: THEME.muted, marginBottom: 6 }}>
-                    Bordas grátis (texto por enquanto)
-                  </div>
-                  <input
-                    value={textoBordas}
-                    onChange={(e) => setTextoBordas(e.target.value)}
-                    placeholder="Ex: Catupiry, Cheddar"
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      border: `1px solid ${THEME.border}`,
-                      outline: "none",
-                      fontWeight: 900,
-                    }}
-                  />
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 800, color: THEME.muted }}>
-                    Depois vamos trocar isso por seleção direta das bordas (por ID).
-                  </div>
-                </div>
-              )}
+                            <div style={{ marginTop: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 900, color: THEME.muted, marginBottom: 8 }}>
+                                Bordas grátis (selecione as que serão FREE)
+                              </div>
+
+                              {borderItems.length === 0 ? (
+                                <div style={{ fontSize: 12, fontWeight: 800, color: THEME.muted }}>
+                                  Nenhuma borda encontrada. Confirme se o título do grupo contém “Borda”.
+                                </div>
+                              ) : (
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                                  {borderItems.map((it: any) => {
+                                    const active = freeBorderKeys.includes(it.key);
+                                    return (
+                                      <label
+                                        key={it.key}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 10,
+                                          padding: "10px 10px",
+                                          borderRadius: 12,
+                                          border: `1px solid ${active ? "rgba(0,184,148,0.35)" : THEME.border}`,
+                                          background: active ? "rgba(0,184,148,0.10)" : "#fff",
+                                          cursor: "pointer",
+                                          fontWeight: 900,
+                                        }}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={active}
+                                          onChange={() => toggleKey(freeBorderKeys, setFreeBorderKeys, it.key)}
+                                  
+
+                                        />
+                                        <span style={{ fontSize: 13 }}>{it.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, color: THEME.muted }}>
+                                Regra: com Pizza G/GG no carrinho, a borda escolhida (1 opção) sai grátis se estiver marcada aqui.
+                              </div>
+                            </div>
+                          )}
+
 
               {/* seleção de recompensa (exceto OPTION_FREE) */}
               {rewardType !== "OPTION_FREE" && (

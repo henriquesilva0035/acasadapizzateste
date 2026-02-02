@@ -29,6 +29,7 @@ type Product = {
   image?: string | null;
   category?: string | null;
   available: boolean;
+  optionGroups?: any[];
 };
 
 type Category = { id: number; name: string };
@@ -95,6 +96,15 @@ function computeCartSubtotalWithPromos() {
     return false;
   };
 
+  // ✅ OPTION_FREE (borda grátis) - desconta o valor da borda escolhida (1 escolha)
+
+
+
+
+
+
+
+
   const isReward = (pr: any, it: any) => {
     const rewardIds = csvToIds(pr.rewardProductIds);
     if (rewardIds.length > 0) {
@@ -106,6 +116,50 @@ function computeCartSubtotalWithPromos() {
   for (const pr of promos) {
     if (!pr?.active) continue;
     if (!hasTrigger(pr)) continue;
+
+    // ✅ OPTION_FREE (borda grátis) - se escolheu uma borda elegível, zera o preço dela (apenas 1 escolha)
+// ✅ OPTION_FREE (borda grátis)
+// Regra: se tiver gatilho no carrinho, e o item tiver uma borda escolhida que esteja na lista free,
+// então desconta o preço dessa borda daquele item.
+// (Como borda é max=1 por item, é simples.)
+if (pr.rewardType === "OPTION_FREE") {
+  const freeBorderIds = csvToIds(pr.rewardOptionItemIds); // ✅ campo correto
+  if (freeBorderIds.length === 0) continue;
+
+  for (const it of lines) {
+    const selected = (it.optionIds || it.optionItemIds || []).map(Number);
+    const picked = selected.find((id: number) => freeBorderIds.includes(id));
+    if (!picked) continue;
+
+    const prod: any = products.find((pp: any) => Number(pp.id) === Number(it.productId));
+    if (!prod || !prod.optionGroups) continue;
+
+    // acha o preço dessa borda no cadastro do produto
+    let borderPrice = 0;
+    for (const g of prod.optionGroups || []) {
+      if (g.available === false) continue;
+      for (const opt of g.items || []) {
+        if (Number(opt.id) === Number(picked)) {
+          borderPrice = Number(opt.price || 0);
+          break;
+        }
+      }
+      if (borderPrice > 0) break;
+    }
+
+    if (borderPrice > 0) {
+      it.__displayTotal = Number((it.__displayTotal - borderPrice).toFixed(2));
+      // ✅ não dá break geral: se tiver 2 pizzas com borda free, aplica em cada uma
+    }
+  }
+
+  continue;
+}
+
+
+
+
+
 
     const targets = lines.filter((it: any) => isReward(pr, it));
     if (targets.length === 0) continue;
@@ -479,7 +533,26 @@ if (otherPrices.length > 0) {
 
 
 
+
 }
+
+function isFreeBorderByPromo(pr: any, optionItemId: number, cartItems: any[]) {
+  if (!pr?.active) return false;
+  if (pr.rewardType !== "OPTION_FREE") return false;
+  if (!cartHasTrigger(pr, cartItems)) return false;
+
+  const freeBorderIds = csvToIds(pr.rewardOptionItemIds);
+  if (freeBorderIds.length === 0) return false;
+
+  return freeBorderIds.includes(Number(optionItemId));
+}
+
+
+
+
+
+
+
 
 function promoTargetsProduct(p: any, promo: any) {
   const rewardIds = csvToIds(promo.rewardProductIds);

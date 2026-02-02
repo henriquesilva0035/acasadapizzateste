@@ -205,6 +205,43 @@ function findOptionItem(product: any, optionItemId: number) {
 
 
 function getAdjustedOptionPrice(optionItem: any, prod: any, cartLines?: any[]) {
+
+  // antes de aplicar qualquer desconto/preço fixo, verifica OPTION_FREr
+    // ✅ OPTION_FREE (borda grátis)
+  // regra: se houver gatilho (pizza G/GG) no carrinho e a opção estiver na lista grátis -> preço da borda vira 0
+  // ✅ OPTION_FREE (borda grátis)
+// regra: se houver gatilho no carrinho e a opção estiver na lista grátis -> preço da borda vira 0
+const promosList = Array.isArray(promos) ? promos : [];
+const linesToCheck = Array.isArray(cartLines) ? cartLines : [];
+
+for (const pr of promosList) {
+  if (!pr?.active) continue;
+  if (pr.rewardType !== "OPTION_FREE") continue;
+
+  // gatilho por IDs
+  const triggerIds = csvToIds(pr.triggerProductIds);
+  const hasTriggerById =
+    triggerIds.length > 0 && linesToCheck.some((it: any) => triggerIds.includes(Number(it.productId)));
+
+  if (!hasTriggerById) continue;
+
+  // ✅ bordas grátis vem do rewardOptionItemIds (campo certo)
+  // bordas grátis (ids de optionItem)
+        const freeBorderIds = csvToIds(pr.rewardOptionItemIds);
+        if (freeBorderIds.length === 0) continue;
+
+        if (freeBorderIds.includes(Number(optionItem.id))) {
+          return 0; // ✅ borda grátis
+        }
+
+}
+
+
+
+
+
+
+
   const base = Number(optionItem?.price || 0);
 
   // Sem promo carregada, devolve preço normal
@@ -256,7 +293,8 @@ function computeUnitFromProductAndOptions(cartItem: any) {
     ? moneyToNumber(prod.promoPrice)
     : Number(prod.price || 0);
 
-  const selectedIds = (cartItem.optionIds || []).map(Number);
+  const selectedIds = (cartItem.optionIds || cartItem.optionItemIds || []).map(Number);
+
   const selectedSet = new Set(selectedIds);
 
   let addons = 0;
@@ -463,6 +501,53 @@ function promoTargetsItem(promo: any, cartItem: any) {
       promoNotes.push(`${pr.name} (brinde)`);
       continue;
     }
+
+    // ✅ OPTION_FREE (borda grátis)
+// Regra: com gatilho no carrinho, se o item tem UMA borda elegível, zera o preço dela
+// ✅ OPTION_FREE (borda grátis) — aqui é SÓ label (o desconto já foi aplicado em getAdjustedOptionPrice)
+if (pr.rewardType === "OPTION_FREE") {
+  const freeBorderIds = csvToIds(pr.rewardOptionItemIds);
+  if (freeBorderIds.length === 0) continue;
+
+  for (const it of lines) {
+    const selectedIds = (it.optionIds || it.optionItemIds || []).map(Number);
+    if (selectedIds.length === 0) continue;
+
+    const prod = getProductById(Number(it.productId));
+    if (!prod) continue;
+
+    // acha qual borda foi escolhida (grupo "borda")
+    let pickedBorder: any = null;
+
+    for (const g of (prod.optionGroups || [])) {
+      const title = String(g.title || "").toLowerCase();
+      if (!title.includes("borda")) continue;
+
+      for (const opt of (g.items || [])) {
+        const oid = Number(opt.id);
+        if (selectedIds.includes(oid)) {
+          pickedBorder = opt;
+          break;
+        }
+      }
+      if (pickedBorder) break;
+    }
+
+    if (!pickedBorder) continue;
+
+    if (freeBorderIds.includes(Number(pickedBorder.id))) {
+      it.__promoLabel = `🎁 Borda grátis: ${pickedBorder.name} (${pr.name})`;
+      promoNotes.push(`${pr.name} (borda grátis)`);
+    }
+  }
+
+  continue;
+}
+
+
+
+
+
 
     // OPTION_FREE: deixamos pro próximo passo (borda grátis)
   }
