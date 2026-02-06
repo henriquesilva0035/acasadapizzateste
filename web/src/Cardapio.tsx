@@ -148,7 +148,7 @@ if (pr.rewardType === "OPTION_FREE") {
     }
 
     if (borderPrice > 0) {
-      it.__displayTotal = Number((it.__displayTotal - borderPrice).toFixed(2));
+     // it.__displayTotal = Number((it.__displayTotal - borderPrice).toFixed(2));
       // ✅ não dá break geral: se tiver 2 pizzas com borda free, aplica em cada uma
     }
   }

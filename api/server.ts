@@ -378,6 +378,7 @@ function applyOptionFree(items: any[], promo: any) {
   })
 }
 
+
 export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
   const items = computedItems.map((it) => ({
     ...it,
@@ -403,32 +404,34 @@ export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
     return false;
   };
 
+  /**
+   * ✅ Decide se "it" é alvo da promoção.
+   *
+   * Regras:
+   * - Se a promo TEM reward (rewardProductIds/rewardCategory), aplica NO reward.
+   * - Se a promo NÃO TEM reward (reward vazio), então é "self-target": aplica NO gatilho.
+   *
+   * Isso é essencial para OPTION_FREE (borda grátis) e promos de desconto no próprio item.
+   */
   const promoTargetsItem = (promo: any, it: any) => {
-  // ❌ nunca aplicar recompensa no produto gatilho
-  const triggerIds = parseCsvIds(promo.triggerProductIds);
+    const rewardIds = parseCsvIds(promo.rewardProductIds);
+    const triggerIds = parseCsvIds(promo.triggerProductIds);
 
-  if (triggerIds.includes(Number(it.productId))) {
+    const hasRewardTarget = rewardIds.length > 0 || !!promo.rewardCategory;
+
+    // Caso normal: aplica na recompensa (reward)
+    if (hasRewardTarget) {
+      const idMatch = rewardIds.length > 0 && rewardIds.includes(Number(it.productId));
+      const catMatch = promo.rewardCategory && it.product?.category === promo.rewardCategory;
+      return idMatch || catMatch;
+    }
+
+    // Caso self-target: sem reward definido -> aplica no gatilho
+    if (triggerIds.length > 0 && triggerIds.includes(Number(it.productId))) return true;
+    if (promo.triggerCategory && it.product?.category === promo.triggerCategory) return true;
+
     return false;
-  }
-
-  if (promo.triggerCategory && it.product?.category === promo.triggerCategory) {
-    // se rewardCategory for diferente, ok
-    if (!promo.rewardCategory) return false;
-    if (promo.rewardCategory === promo.triggerCategory) return false;
-  }
-
-  const rewardIds = parseCsvIds(promo.rewardProductIds);
-
-  const idMatch =
-    rewardIds.length > 0 && rewardIds.includes(Number(it.productId));
-
-  const catMatch =
-    promo.rewardCategory &&
-    it.product?.category === promo.rewardCategory;
-
-  return idMatch || catMatch;
-};
-
+  };
 
   for (const promo of promosToday) {
     if (!promo?.active) continue;
@@ -467,7 +470,9 @@ export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
     if (promo.rewardType === "ITEM_FREE") {
       let remainingFree = Number(promo.maxRewardQty || 1);
 
-      const sortedTargets = [...targets].sort((a, b) => Number(a.unit || 0) - Number(b.unit || 0));
+      const sortedTargets = [...targets].sort(
+        (a, b) => Number(a.unit || 0) - Number(b.unit || 0)
+      );
 
       for (const it of sortedTargets) {
         if (remainingFree <= 0) break;
@@ -477,7 +482,12 @@ export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
         if (q <= remainingFree) {
           it.unit = 0;
           it.total = 0;
-          it.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType, freeQty: q });
+          it.appliedPromos.push({
+            id: promo.id,
+            name: promo.name,
+            type: promo.rewardType,
+            freeQty: q,
+          });
           remainingFree -= q;
         } else {
           const freeQty = remainingFree;
@@ -495,7 +505,10 @@ export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
             quantity: freeQty,
             unit: 0,
             total: 0,
-            appliedPromos: [...it.appliedPromos, { id: promo.id, name: promo.name, type: promo.rewardType, freeQty }],
+            appliedPromos: [
+              ...it.appliedPromos,
+              { id: promo.id, name: promo.name, type: promo.rewardType, freeQty },
+            ],
           };
 
           items.push(freeLine);
@@ -505,19 +518,53 @@ export function applyPromotionsV2(computedItems: any[], promosToday: any[]) {
       continue;
     }
 
-    // OPTION_FREE deixamos para a próxima etapa
+    /**
+     * ✅ OPTION_FREE (ex: borda grátis)
+     * Agora aplica em "targets" (que podem ser reward OU self-target dependendo da promo)
+     */
+    if (promo.rewardType === "OPTION_FREE") {
+      const freeOptionIds = parseCsvIds(promo.rewardOptionItemIds);
+      if (freeOptionIds.length === 0) continue;
+
+      for (const it of targets) {
+        const discount = (it.pickedItems || [])
+          .filter((p: any) => freeOptionIds.includes(Number(p.optionItemId)))
+          .reduce((acc: number, p: any) => acc + Number(p.price || 0), 0);
+
+        if (discount <= 0) continue;
+
+        // zera preço dessas opções (pra ficar coerente na impressão/PDV/status)
+        for (const p of (it.pickedItems || [])) {
+          if (freeOptionIds.includes(Number(p.optionItemId))) {
+            p.price = 0;
+          }
+        }
+
+        // desconta do unit/total
+        it.unit = Number(Math.max(0, Number(it.unit || 0) - discount).toFixed(2));
+        it.total = Number((Number(it.unit) * Number(it.quantity || 1)).toFixed(2));
+
+        it.appliedPromos.push({ id: promo.id, name: promo.name, type: promo.rewardType });
+      }
+
+      continue;
+    }
   }
 
   return items;
 }
 
+
+
 function parseCsvIds(v?: string | null): number[] {
   if (!v) return [];
   return String(v)
-    .split(",")
+    .trim()
+    .split(/[;,|\s]+/)
     .map((s) => Number(s.trim()))
-    .filter((n) => !Number.isNaN(n));
+    .filter((n) => Number.isFinite(n));
 }
+
 
 
 

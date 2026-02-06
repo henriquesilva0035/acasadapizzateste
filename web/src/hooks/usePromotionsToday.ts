@@ -28,13 +28,22 @@ export type Promo = {
 
 
 
+/**
+ * Converte lista de IDs vinda do banco em number[]
+ * Aceita separadores comuns: vírgula, ponto-e-vírgula, espaço e pipe
+ * Ex: "1,2" | "1;2" | "1 2" | "1|2"
+ */
 export function csvToIds(v?: string | null): number[] {
   if (!v) return [];
   return String(v)
-    .split(",")
+    .trim()
+    .split(/[;,|\s]+/)
     .map((s) => Number(s.trim()))
-    .filter((n) => !Number.isNaN(n));
+    .filter((n) => Number.isFinite(n));
 }
+
+
+
 
 export function usePromotionsToday() {
   const [promos, setPromos] = useState<Promo[]>([]);

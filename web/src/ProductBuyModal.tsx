@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./lib/api";
 
-import { useCart } from "./contexts/CartContext"; // ou "../contexts/CartContext" dependendo do caminho
-import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday"; // ajuste caminho
+import { useCart } from "./contexts/CartContext";
+import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
 
 // --- TIPOS ---
 type ChargeMode = "SUM" | "MAX" | "MIN";
@@ -46,20 +46,6 @@ type Props = {
   onAdded?: () => void;
 };
 
-/**
- * =========================================================
- * ✅ HELPERS (organizados)
- * - moneyToNumber / sum: utilidades gerais
- * - isPromoActive: promo FIXA do produto (promoPrice + promoDays)
- * - Promo engine do modal:
- *   - preço de OPÇÃO: só muda se rewardOptionItemIds incluir a opção
- *   - preço do PRODUTO (base): aplica DISCOUNT_PERCENT quando:
- *       - o produto atual é RECOMPENSA (rewardProductIds/rewardCategory)
- *       - existe GATILHO no carrinho (triggerProductIds/triggerCategory)
- *       - e o produto atual NÃO é o gatilho
- * =========================================================
- */
-
 function sum(arr: number[]) {
   return arr.reduce((a, b) => a + b, 0);
 }
@@ -95,19 +81,18 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
   const [loading, setLoading] = useState(false);
 
   const { promos } = usePromotionsToday();
-  const { items: cartItems } = useCart();
-  const { addItem, items } = useCart();
+  const cart = useCart();
+  const cartItems = cart.items;
+  const addItem = cart.addItem;
+  const items = cart.items;
 
-  // ✅ Map p/ descobrir categoria dos itens do carrinho (necessário p/ triggerCategory)
   const [prodMeta, setProdMeta] = useState<Record<number, { category?: string | null }>>({});
 
-  // ✅ refs pra calcular o tamanho real do rodapé e não “passar” por baixo
   const footerRef = useRef<HTMLDivElement | null>(null);
-  const [footerH, setFooterH] = useState(110); // fallback
+  const [footerH, setFooterH] = useState(110);
 
   useLayoutEffect(() => {
     if (!open) return;
-
     const el = footerRef.current;
     if (!el) return;
 
@@ -117,14 +102,12 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     };
 
     update();
-
     const ro = new ResizeObserver(() => update());
     ro.observe(el);
 
     return () => ro.disconnect();
   }, [open, product]);
 
-  // ✅ trava o scroll do site por trás
   useEffect(() => {
     if (!open) return;
 
@@ -140,7 +123,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     };
   }, [open]);
 
-  // ✅ carrega produto quando abre
   useEffect(() => {
     if (!open || !productId) return;
 
@@ -157,11 +139,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       .finally(() => setLoading(false));
   }, [open, productId]);
 
-  /**
-   * ✅ Carrega meta simples dos produtos (id + category) para:
-   * - checar triggerCategory no carrinho (G/GG etc).
-   * Se seu endpoint /products já retorna category (mesmo “light”), isso resolve.
-   */
   useEffect(() => {
     if (!open) return;
 
@@ -176,126 +153,40 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
         }
         setProdMeta(map);
       } catch {
-        // se falhar, triggerCategory pode não funcionar no modal,
-        // mas triggerProductIds continua funcionando.
         setProdMeta({});
       }
     })();
   }, [open]);
 
-  /**
-   * =========================================================
-   * ✅ PROMO: OPÇÕES (sabores/bordas)
-   * =========================================================
-   */
+  function cartHasTrigger(promo: any, cartItems0: any[]) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
 
-  // (opcional) se você usa triggerCategory/triggerProductIds para “marcar” onde a promo de opção aparece
-  function promoAppliesToProduct(pr: any, prod: Product) {
-    const triggerIds = csvToIds(pr.triggerProductIds);
+    // prioridade para IDs
+    if (triggerIds.length > 0) {
+      return cartItems0.some((it) => triggerIds.includes(Number(it.productId)));
+    }
 
+    // só usa categoria se não houver IDs
+    if (promo.triggerCategory) {
+      return cartItems0.some((it) => String(it.productCategory) === String(promo.triggerCategory));
+    }
+
+    return false;
+  }
+
+  function productIsTrigger(promo: any, prod: Product) {
+    const triggerIds = csvToIds(promo.triggerProductIds);
+
+    // se tem IDs, ignora categoria
     if (triggerIds.length > 0) {
       return triggerIds.includes(Number(prod.id));
     }
 
-    if (pr.triggerCategory) {
-      return String(pr.triggerCategory) === String(prod.category);
-    }
-
-    return false;
-  }
-
-  function getAdjustedOptionPrice(optionItem: OptionItem, prod: Product) {
-    const original = Number(optionItem.price || 0);
-    let best = original;
-
-    for (const pr of promos || []) {
-      if (!pr?.active) continue;
-
-      // ✅ Opção só muda preço se ela estiver na RECOMPENSA
-      const rewardOptIds = csvToIds(pr.rewardOptionItemIds);
-      if (rewardOptIds.length === 0) continue;
-      if (!rewardOptIds.includes(Number(optionItem.id))) continue;
-
-      // mantém para “escopo” de onde a promo vale (se você quiser)
-      if (!promoAppliesToProduct(pr, prod)) continue;
-
-      if (pr.rewardType === "FIXED_PRICE") {
-        const fp = Number(pr.fixedPrice || 0);
-        if (fp >= 0) best = Math.min(best, fp);
-        continue;
-      }
-
-      if (pr.rewardType === "DISCOUNT_PERCENT") {
-        const pct = Number(pr.discountPercent || 0);
-        if (pct > 0 && pct <= 100) {
-          const np = Number(((original * (100 - pct)) / 100).toFixed(2));
-          best = Math.min(best, np);
-        }
-        continue;
-      }
-    }
-
-    return best;
-  }
-
-  /**
-   * =========================================================
-   * ✅ PROMO: BASE DO PRODUTO (ex: P com 50% OFF)
-   * =========================================================
-   */
-
-  function cartHasTrigger(promo: any, cartItemsArg: any[]) {
-    const triggerIds = csvToIds(promo.triggerProductIds);
-
-    // ✅ PRIORIDADE TOTAL para IDs
-    if (triggerIds.length > 0) {
-      return cartItemsArg.some((it) => triggerIds.includes(Number(it.productId)));
-    }
-
-    // só usa categoria se NÃO houver IDs
     if (promo.triggerCategory) {
-      return cartItemsArg.some((it) => String(it.productCategory) === String(promo.triggerCategory));
+      return String(prod.category) === String(promo.triggerCategory);
     }
 
     return false;
-  }
-
-  // ✅ NOVO: considera o produto ATUAL como gatilho também (pra aparecer grátis no modal mesmo com carrinho vazio)
-  function productIsTriggerNow(promo: any, prod: any) {
-    const triggerIds = csvToIds(promo.triggerProductIds);
-
-    // ✅ prioridade total pra IDs
-    if (triggerIds.length > 0) {
-      return triggerIds.includes(Number(prod?.id));
-    }
-
-    // fallback categoria só se não tiver IDs
-    if (promo.triggerCategory) {
-      return String(prod?.category) === String(promo.triggerCategory);
-    }
-
-    return false;
-  }
-
-  function getOptionAdjustedPrice(optionItem: any, prod: any) {
-    const base = Number(optionItem?.price || 0);
-
-    // ✅ borda grátis (OPTION_FREE)
-    for (const pr of promos || []) {
-      if (!pr?.active) continue;
-      if (pr.rewardType !== "OPTION_FREE") continue;
-
-      // ✅ ativa se já tem gatilho no carrinho OU se o produto atual é o gatilho
-      const promoActive = cartHasTrigger(pr, cartItems || []) || productIsTriggerNow(pr, prod);
-      if (!promoActive) continue;
-
-      const freeIds = csvToIds(pr.rewardOptionItemIds || pr.triggerOptionItemIds);
-      if (freeIds.includes(Number(optionItem.id))) {
-        return 0; // ✅ grátis
-      }
-    }
-
-    return base;
   }
 
   function productIsReward(promo: any, prod: Product) {
@@ -307,38 +198,15 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     return false;
   }
 
-  function productIsTrigger(promo: any, prod: Product) {
-    const triggerIds = csvToIds(promo.triggerProductIds);
-
-    // ✅ se tem ID, IGNORA categoria completamente
-    if (triggerIds.length > 0) {
-      return triggerIds.includes(Number(prod.id));
-    }
-
-    // só usa categoria se não tiver IDs
-    if (promo.triggerCategory) {
-      return String(prod.category) === String(promo.triggerCategory);
-    }
-
-    return false;
-  }
-
-  function applyDynamicProductPromos(prod: Product, base: number, cartItemsArg: any[]) {
+  function applyDynamicProductPromos(prod: Product, base: number, cartItems0: any[]) {
     let best = base;
 
     for (const pr of promos || []) {
       if (!pr?.active) continue;
-
-      // ✅ aqui: só cuidamos do desconto percentual no produto (P)
       if (pr.rewardType !== "DISCOUNT_PERCENT") continue;
 
-      // precisa existir gatilho no carrinho (G/GG)
-      if (!cartHasTrigger(pr, cartItemsArg)) continue;
-
-      // produto atual tem que ser recompensa
+      if (!cartHasTrigger(pr, cartItems0)) continue;
       if (!productIsReward(pr, prod)) continue;
-
-      // e nunca aplicar se este produto for o gatilho
       if (productIsTrigger(pr, prod)) continue;
 
       const pct = Number(pr.discountPercent || 0);
@@ -351,18 +219,37 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
     return best;
   }
 
-  // ✅ cálculo de preço/validação
+  // ✅ AQUI está a correção principal: OPTION_FREE aparece grátis se:
+  // - já tem gatilho no carrinho OU
+  // - o produto atual É o gatilho (G/GG)
+  function getOptionAdjustedPrice(optionItem: OptionItem, prod: Product) {
+    const base = Number(optionItem?.price || 0);
+
+    for (const pr of promos || []) {
+      if (!pr?.active) continue;
+      if (pr.rewardType !== "OPTION_FREE") continue;
+
+      const hasTrigger = cartHasTrigger(pr, cartItems || []) || productIsTrigger(pr, prod);
+      if (!hasTrigger) continue;
+
+      const freeIds = csvToIds(pr.rewardOptionItemIds || pr.triggerOptionItemIds);
+      if (freeIds.includes(Number(optionItem.id))) {
+        return 0;
+      }
+    }
+
+    return base;
+  }
+
   const calc = useMemo(() => {
     if (!product) return { addons: 0, total: 0, unit: 0, unitRaw: 0, base: 0, errors: [] as string[], optionSummary: "" };
 
     const errors: string[] = [];
     let addons = 0;
 
-    // 1) base normal ou promo fixa do produto (promoPrice/promoDays)
     const promoOn = isPromoActive(product);
     const baseRaw = promoOn ? moneyToNumber(product.promoPrice) : moneyToNumber(product.price);
 
-    // 2) ✅ aplica promo dinâmica APENAS pra exibir (não salvar no carrinho)
     const baseDisplay = applyDynamicProductPromos(product, baseRaw, items || []);
 
     const summaryParts: string[] = [];
@@ -379,7 +266,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
 
       if (picks.length) summaryParts.push(`${g.title}: ${picks.map((x) => x.name).join(", ")}`);
 
-      // ✅ preço das opções (borda grátis via OPTION_FREE)
+      // ✅ usa o preço ajustado (inclui borda grátis)
       const prices = picks.map((op) => getOptionAdjustedPrice(op, product));
       const mode = String(g.chargeMode || "SUM").toUpperCase();
 
@@ -440,7 +327,8 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
       return;
     }
 
-    // ✅ salvamos SEM promo dinâmica (o carrinho aplica ao exibir)
+    // ✅ SALVA unitPrice sem promo dinâmica de produto,
+    // mas já com borda grátis (porque aqui ela já está aplicada via getOptionAdjustedPrice)
     addItem(
       {
         productId: product.id,
@@ -490,7 +378,7 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
         {/* Imagem de Topo */}
         <div style={{ position: "relative", height: 200, background: "#fff", flexShrink: 0 }}>
           {product?.image?.startsWith("http") ? (
-            <img src={product.image} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={product.image!} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
             <div
               style={{
@@ -550,12 +438,10 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
               <h2 style={{ margin: "0 0 5px 0", color: C_DARK }}>{product.name}</h2>
               <p style={{ margin: "0 0 15px 0", color: "#636e72", fontSize: 14 }}>{product.description}</p>
 
-              {/* ✅ base já aparece com promo dinâmica aplicada */}
               <div style={{ fontSize: 18, color: C_RED, fontWeight: 900, marginBottom: 20 }}>
                 R$ {Number(calc.base).toFixed(2)}
               </div>
 
-              {/* Grupos de Opções */}
               {product.optionGroups.map((g) => {
                 if (!g.available) return null;
 
@@ -601,6 +487,10 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                         .filter((it) => it.available)
                         .map((it) => {
                           const isSelected = selected.has(it.id);
+
+                          const original = Number(it.price || 0);
+                          const adj = product ? getOptionAdjustedPrice(it, product) : original;
+                          const changed = adj !== original;
 
                           return (
                             <div
@@ -652,33 +542,25 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                                     </div>
                                   )}
 
-                                  {(() => {
-                                    const original = Number(it.price || 0);
-                                    if (original <= 0) return null;
+                                  {original > 0 && (
+                                    <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                      {adj === 0 ? (
+                                        <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>GRÁTIS</div>
+                                      ) : (
+                                        <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>+ R$ {adj.toFixed(2)}</div>
+                                      )}
 
-                                    const adj = product ? getOptionAdjustedPrice(it, product) : original;
-                                    const changed = adj !== original;
+                                      {changed && (
+                                        <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>+ R$ {original.toFixed(2)}</div>
+                                      )}
 
-                                    return (
-                                      <div style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                        {adj === 0 ? (
-                                          <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>GRÁTIS</div>
-                                        ) : (
-                                          <div style={{ color: C_GREEN, fontWeight: "bold", fontSize: 13 }}>+ R$ {adj.toFixed(2)}</div>
-                                        )}
-
-                                        {changed && adj > 0 && (
-                                          <div style={{ textDecoration: "line-through", color: "#999", fontSize: 12 }}>+ R$ {original.toFixed(2)}</div>
-                                        )}
-
-                                        {changed && (
-                                          <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,184,148,0.12)", padding: "3px 8px", borderRadius: 999 }}>
-                                            PROMO
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
+                                      {changed && (
+                                        <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,184,148,0.12)", padding: "3px 8px", borderRadius: 999 }}>
+                                          PROMO
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
@@ -706,7 +588,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
                 );
               })}
 
-              {/* Observação */}
               <div style={{ marginTop: 20 }}>
                 <label style={{ fontWeight: "bold", fontSize: 13, color: "#636e72" }}>Alguma observação?</label>
 
@@ -742,7 +623,6 @@ export default function ProductBuyModal({ open, productId, onClose, onAdded }: P
           )}
         </div>
 
-        {/* Rodapé */}
         {product && (
           <div
             ref={footerRef}

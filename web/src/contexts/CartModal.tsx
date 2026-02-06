@@ -283,18 +283,21 @@ for (const pr of promosList) {
 
 
 function computeUnitFromProductAndOptions(cartItem: any) {
+  // ✅ Fonte da verdade: unitPrice salvo no carrinho (RAW).
+  // Isso evita recalcular e evita a promoção “vazar” pra outro item.
   const saved = Number(cartItem.unitPrice ?? 0);
+  if (saved > 0) return saved;
 
-  // fallback / validação usando produto + opções
+  // fallback (carrinhos antigos / itens sem unitPrice)
   const prod = getProductById(Number(cartItem.productId));
-  if (!prod) return saved > 0 ? saved : 0;
+  if (!prod) return 0;
 
+  // base do produto (se tiver promo própria do produto, aplica aqui)
   const base = isProductPromoActive(prod)
     ? moneyToNumber(prod.promoPrice)
     : Number(prod.price || 0);
 
   const selectedIds = (cartItem.optionIds || cartItem.optionItemIds || []).map(Number);
-
   const selectedSet = new Set(selectedIds);
 
   let addons = 0;
@@ -316,14 +319,7 @@ function computeUnitFromProductAndOptions(cartItem: any) {
     addons += groupAdd;
   }
 
-  const computed = Number((base + addons).toFixed(2));
-
-  // ✅ se o carrinho já tem unitPrice salvo (RAW), usamos.
-  // Se estiver diferente (carrinhos antigos onde unitPrice já veio "com promo"),
-  // preferimos o recomputado pra evitar "desconto em cima de desconto".
-  if (saved > 0 && Math.abs(saved - computed) < 0.01) return saved;
-
-  return computed;
+  return Number((base + addons).toFixed(2));
 }
 
 
