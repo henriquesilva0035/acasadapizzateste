@@ -1,399 +1,520 @@
-import { useState, useEffect, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { API_URL } from './config'
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { API_URL } from "./config";
 
-export default function PedidoMesa() {
-  const { tableId } = useParams()
-  const navigate = useNavigate()
+import { CartProvider, useCart } from "./contexts/CartContext";
+import ProductBuyModal from "./ProductBuyModal";
+import { usePromotionsToday, csvToIds } from "./hooks/usePromotionsToday";
+import { buildPromoText, isRewardPromoActiveForProduct, isTriggerProductInCart } from "./utils/promoText";
 
-  const [produtosDisponiveis, setProdutosDisponiveis] = useState<any[]>([])
-  const [filtro, setFiltro] = useState('TODOS')
+type Product = {
+  id: number;
+  name: string;
+  description?: string | null;
+  price: number;
+  promoPrice?: number | null;
+  promoDays?: string | null;
+  image?: string | null;
+  category?: string | null;
+  available: boolean;
+  optionGroups?: any[];
+};
 
-  // Carrinho local apenas para acumular antes de enviar
-  const [carrinho, setCarrinho] = useState<any[]>([])
+type Category = { id: number; name: string };
 
-  // Checkbox de Viagem
-  const [isTakeout, setIsTakeout] = useState(false)
+function money(v: number) {
+  const n = Number(v || 0);
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 
-  // Modal
-  const [itemSelecionado, setItemSelecionado] = useState<any>(null)
-  const [showResumo, setShowResumo] = useState(false)
-  const [obs, setObs] = useState('')
+function isFoto(txt: any) {
+  const s = String(txt || "");
+  return s.startsWith("data:image") || s.startsWith("http");
+}
 
-  // guarda IDs de option items selecionados
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+function PedidoMesaInner({ tableId }: { tableId: string }) {
+  const navigate = useNavigate();
 
-  const isFoto = (txt: string) => !!txt && (txt.startsWith('data:image') || txt.startsWith('http'))
-  const norm = (s: any) => String(s ?? '').trim().toLowerCase()
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  async function fetchProdutos() {
-    const r = await fetch(`${API_URL}/products`)
-    const data = await r.json()
-    // só disponíveis
-    setProdutosDisponiveis((data || []).filter((p: any) => p.available))
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>("TODOS");
+
+  // Modal de compra (igual online)
+  const [buyOpen, setBuyOpen] = useState(false);
+  const [buyProductId, setBuyProductId] = useState<number | null>(null);
+
+  // Resumo (carrinho da mesa)
+  const [resumeOpen, setResumeOpen] = useState(false);
+
+  // Checkbox Viagem
+  const [isTakeout, setIsTakeout] = useState(false);
+
+  const { items, total, removeItem, clear } = useCart();
+
+  // Promoções do dia (mesma fonte do online)
+  const { promos } = usePromotionsToday();
+
+  const itemsCount = items.reduce((acc, it) => acc + (it.qty || 1), 0);
+
+  async function fetchProducts() {
+    const r = await fetch(`${API_URL}/products`);
+    const data = await r.json();
+    setProducts((Array.isArray(data) ? data : []).filter((p: any) => p?.available));
   }
 
-  // ✅ polling de produtos (produto desativado some sem precisar sair da tela)
+  async function fetchCategories() {
+    try {
+      const r = await fetch(`${API_URL}/categories`);
+      const data = await r.json();
+      setCategories(Array.isArray(data) ? data : []);
+    } catch {
+      setCategories([]);
+    }
+  }
+
+  // ✅ polling (igual você já fazia), pra refletir produto desativado sem sair da tela
   useEffect(() => {
-    fetchProdutos().catch(console.error)
-    const t = setInterval(() => {
-      fetchProdutos().catch(() => {})
-    }, 5000) // 5s (pode colocar 3000)
-    return () => clearInterval(t)
-  }, [])
+    let mounted = true;
 
-  // categorias dinâmicas vindo dos produtos
-  const categoriasDinamicas = useMemo(() => {
-    return Array.from(new Set(produtosDisponiveis.map((p: any) => p.category).filter(Boolean)))
-      .map((c) => String(c))
-      .sort((a, b) => a.localeCompare(b))
-  }, [produtosDisponiveis])
-
-  const CATEGORIAS_REAIS = useMemo(() => ['TODOS', ...categoriasDinamicas], [categoriasDinamicas])
-
-  // ✅ filtro único (sem redeclare)
-  const produtosFiltrados = useMemo(() => {
-    return produtosDisponiveis.filter((p: any) => {
-      if (norm(filtro) === 'todos') return true
-      return norm(p.category) === norm(filtro)
-    })
-  }, [produtosDisponiveis, filtro])
-
-  function abrirModal(produto: any) {
-    setItemSelecionado(produto)
-    setObs('')
-    setSelectedIds(new Set())
-  }
-
-  function toggleOption(group: any, item: any) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      const isChecked = next.has(item.id)
-
-      if (!isChecked) {
-        const selecionadosNoGrupo = (group.items || []).filter((it: any) => next.has(it.id))
-
-        if (selecionadosNoGrupo.length >= group.max) {
-          if (group.max === 1) {
-            // radio -> troca
-            selecionadosNoGrupo.forEach((it: any) => next.delete(it.id))
-          } else {
-            // checkbox com limite -> bloqueia
-            return next
-          }
-        }
-        next.add(item.id)
-      } else {
-        next.delete(item.id)
+    async function load() {
+      try {
+        setLoading(true);
+        await Promise.all([fetchProducts(), fetchCategories()]);
+      } finally {
+        if (mounted) setLoading(false);
       }
-
-      return next
-    })
-  }
-
-  const podeAdicionar = () => {
-    if (!itemSelecionado) return false
-    for (const group of itemSelecionado.optionGroups || []) {
-      if (!group.available) continue
-      const count = (group.items || []).filter((it: any) => selectedIds.has(it.id)).length
-      if (count < group.min) return false
-    }
-    return true
-  }
-
-  function adicionarAoCarrinho() {
-    if (!podeAdicionar()) return
-
-    const itemFinal = {
-      productId: itemSelecionado.id,
-      name: itemSelecionado.name,
-      quantity: 1,
-      optionItemIds: Array.from(selectedIds),
-      observation: obs,
     }
 
-    setCarrinho((prev) => [...prev, itemFinal])
-    setItemSelecionado(null)
+    load().catch(() => {});
+    const t = setInterval(() => {
+      fetchProducts().catch(() => {});
+      fetchCategories().catch(() => {});
+    }, 8000);
+
+    return () => {
+      mounted = false;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId]);
+
+  // Se entrar numa mesa nova, garante carrinho "limpo" dessa mesa só (o storageKey já separa, mas evita estado antigo em memória)
+  useEffect(() => {
+    clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId]);
+
+  const categoriasDinamicasFallback = useMemo(() => {
+    return Array.from(new Set(products.map((p) => p.category).filter(Boolean)))
+      .map((c) => String(c))
+      .sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const categorias = useMemo(() => {
+    const apiCats = (categories || [])
+      .map((c) => c?.name)
+      .filter(Boolean)
+      .map((c) => String(c));
+
+    const list = apiCats.length > 0 ? apiCats : categoriasDinamicasFallback;
+    return ["TODOS", ...Array.from(new Set(list))];
+  }, [categories, categoriasDinamicasFallback]);
+
+  const filtered = useMemo(() => {
+    if (selectedCategory === "TODOS") return products;
+    return products.filter((p) => String(p.category || "") === selectedCategory);
+  }, [products, selectedCategory]);
+
+  const productNameById = (id: number) => {
+    const p = products.find((x) => x.id === id);
+    return p?.name || `#${id}`;
+  };
+
+  function openBuyModal(productId: number) {
+    setBuyProductId(productId);
+    setBuyOpen(true);
   }
 
-  function removerDoCarrinho(index: number) {
-    if (!confirm('Remover este item do pedido?')) return
-    const novo = carrinho.filter((_, i) => i !== index)
-    setCarrinho(novo)
-    if (novo.length === 0) setShowResumo(false)
+  function getPromoBadgeForProduct(product: Product) {
+    if (!promos || promos.length === 0) return null;
+
+    // 1) se for recompensa e o gatilho está no carrinho
+    const rewardPromo = promos.find((p) =>
+      isRewardPromoActiveForProduct({
+        promo: p,
+        productId: product.id,
+        cartItems: items,
+      })
+    );
+    if (rewardPromo) {
+      return buildPromoText(rewardPromo as any, productNameById, product.category || undefined);
+    }
+
+    // 2) se o próprio produto é gatilho e já está no carrinho (reforça a promo ativa)
+    const triggerPromo = promos.find((p) =>
+      isTriggerProductInCart({
+        promo: p,
+        productId: product.id,
+        cartItems: items,
+      })
+    );
+    if (triggerPromo) {
+      return buildPromoText(triggerPromo as any, productNameById, product.category || undefined);
+    }
+
+    // 3) caso não esteja ativa ainda, mostra uma dica "tem promo" quando o produto participa
+    const participates = promos.find((p) => {
+      const trigIds = csvToIds((p as any).triggerProductIds);
+      const rewIds = csvToIds((p as any).rewardProductIds);
+      if (trigIds.includes(product.id)) return true;
+      if (rewIds.includes(product.id)) return true;
+      if ((p as any).triggerCategory && (p as any).triggerCategory === product.category) return true;
+      if ((p as any).rewardCategory && (p as any).rewardCategory === product.category) return true;
+      return false;
+    });
+
+    if (participates) {
+      return `🎁 Tem promoção hoje`;
+    }
+
+    return null;
   }
 
   async function enviarPedido() {
-    if (carrinho.length === 0) return
+    if (items.length === 0) return;
 
-    const waiterName = localStorage.getItem(`atendente_mesa_${tableId}_nome`)
+    const waiterName = localStorage.getItem(`atendente_mesa_${tableId}_nome`);
+
+    const payloadItems = items.map((it) => ({
+      productId: Number(it.productId),
+      name: it.name,
+      quantity: Number(it.qty || 1),
+      optionItemIds: Array.isArray(it.optionIds) ? it.optionIds : [],
+      observation: it.notes || "",
+    }));
 
     const res = await fetch(`${API_URL}/orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tableId: Number(tableId),
-        waiterName: waiterName || 'Garçom',
-        origin: 'LOCAL',
-        items: carrinho,
+        waiterName: waiterName || "Garçom",
+        origin: "LOCAL",
+        items: payloadItems,
         isTakeout,
       }),
-    })
+    });
 
     if (res.ok) {
-      alert('Pedido Enviado com Sucesso! 🚀')
-      navigate('/mesas')
+      alert("Pedido Enviado com Sucesso! 🚀");
+      clear();
+      navigate("/mesas");
     } else {
-      const erro = await res.json().catch(() => ({}))
-      alert('Erro: ' + (erro.error || 'Falha ao enviar'))
+      const erro = await res.json().catch(() => ({}));
+      alert("Erro: " + (erro.error || "Falha ao enviar"));
     }
   }
 
-  // ✅ preço: se base=0, mostrar "A partir de" com menor option price
-// ✅ Preço Inteligente: Se for 0, busca o menor valor dentro das opções
-  function getDisplayPrice(p: any) {
-    const base = Number(p.price || 0)
-
-    // Se o produto tem preço fixo (maior que 0), usa ele
-    if (base > 0) {
-        return { label: `R$ ${base.toFixed(2)}`, isFrom: false }
-    }
-
-    // Se o preço é 0, vamos caçar o menor preço nas opções
-    const optionPrices: number[] = []
-    
-    // Verifica se existem grupos de opções carregados
-    if (p.optionGroups && Array.isArray(p.optionGroups)) {
-        for (const g of p.optionGroups) {
-            // Pula grupos desativados, se houver essa flag
-            if (g.available === false) continue;
-
-            for (const it of g.items || []) {
-                const pr = Number(it.price || 0)
-                // Só considera preços maiores que zero
-                if (pr > 0) optionPrices.push(pr)
-            }
-        }
-    }
-
-    // Se não achou nenhum preço nas opções (ou não vieram options do backend)
-    if (optionPrices.length === 0) {
-        return { label: 'R$ 0.00', isFrom: false } // Ou 'Sob Consulta'
-    }
-
-    // Pega o menor valor encontrado
-    const min = Math.min(...optionPrices)
-    return { label: `A partir de R$ ${min.toFixed(2)}`, isFrom: true }
-  }
   return (
-    <div style={{ paddingBottom: '140px', background: '#f8f9fa', minHeight: '100vh', fontFamily: 'Arial' }}>
-      <div style={{ background: '#2d3436', padding: '15px', color: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
-        <h2 style={{ margin: 0 }}>Mesa {tableId} - Novo Pedido</h2>
-        <button
-          onClick={() => navigate('/mesas')}
-          style={{ background: 'transparent', border: '1px solid white', color: 'white', padding: '5px 10px', borderRadius: '5px', marginTop: '10px', cursor: 'pointer' }}
-        >
-          ⬅ Voltar
-        </button>
-      </div>
-
-      <div style={{ overflowX: 'auto', whiteSpace: 'nowrap', padding: '15px', background: 'white', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-        {CATEGORIAS_REAIS.map((cat) => (
+    <div style={{ minHeight: "100dvh", paddingBottom: items.length > 0 ? 120 : 20, background: "#f6f7fb" }}>
+      {/* Top */}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, padding: 14, background: "white", borderBottom: "1px solid #eee" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <button
-            key={cat}
-            onClick={() => setFiltro(cat)}
+            onClick={() => navigate("/mesas")}
+            style={{ border: "1px solid #ddd", background: "white", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}
+          >
+            ← Mesas
+          </button>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>
+            Mesa #{tableId}
+          </div>
+          <button
+            onClick={() => setResumeOpen(true)}
+            disabled={items.length === 0}
             style={{
-              padding: '10px 20px',
-              marginRight: '10px',
-              borderRadius: '20px',
-              border: 'none',
-              background: filtro === cat ? '#0984e3' : '#dfe6e9',
-              color: filtro === cat ? 'white' : '#2d3436',
-              fontWeight: 'bold',
-              cursor: 'pointer',
+              border: "none",
+              background: items.length === 0 ? "#ddd" : "#ff6b6b",
+              color: "white",
+              borderRadius: 10,
+              padding: "10px 12px",
+              cursor: items.length === 0 ? "not-allowed" : "pointer",
+              fontWeight: 800,
             }}
           >
-            {cat}
+            🧾 {itemsCount}
           </button>
-        ))}
-      </div>
-
-      <div style={{ padding: '15px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '15px' }}>
-        {produtosFiltrados.map((p: any) => {
-          const priceInfo = getDisplayPrice(p)
-          return (
-            <div
-              key={p.id}
-              onClick={() => abrirModal(p)}
-              style={{
-                background: 'white',
-                borderRadius: '15px',
-                padding: '15px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                textAlign: 'center',
-                boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                cursor: 'pointer',
-              }}
-            >
-              <div style={{ width: '80px', height: '80px', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px' }}>
-                {isFoto(p.image) ? (
-                  <img src={p.image} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '10px' }} />
-                ) : (
-                  p.image || '🍔'
-                )}
-              </div>
-
-              <div style={{ fontWeight: 'bold', color: '#2d3436', marginBottom: '5px' }}>{p.name}</div>
-
-              <div style={{ color: '#00b894', fontWeight: '900', fontSize: 14 }}>
-                {priceInfo.label}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* MODAL DE OPÇÕES */}
-      {itemSelecionado && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ background: 'white', width: '100%', maxWidth: '500px', height: '85vh', borderRadius: '20px 20px 0 0', padding: '20px', overflowY: 'auto' }}>
-            <h2 style={{ marginTop: 0 }}>{itemSelecionado.name}</h2>
-
-            <textarea
-              placeholder="Observação..."
-              value={obs}
-              onChange={(e) => setObs(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd', marginBottom: '15px' }}
-            />
-
-            {(itemSelecionado.optionGroups || []).filter((g: any) => g.available).map((group: any) => (
-              <div key={group.id} style={{ marginBottom: '20px' }}>
-                <div style={{ background: '#eee', padding: '8px', borderRadius: '5px', marginBottom: '8px', fontWeight: 'bold' }}>
-                  {group.title} (Min: {group.min}, Max: {group.max})
-                </div>
-
-                {(group.items || []).filter((it: any) => it.available).map((opt: any) => {
-                  const isSelected = selectedIds.has(opt.id)
-                  return (
-                    <div
-                      key={opt.id}
-                      onClick={() => toggleOption(group, opt)}
-                      style={{
-                        padding: '10px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        borderBottom: '1px solid #eee',
-                        background: isSelected ? '#fff0e6' : 'transparent',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span>{opt.name}</span>
-                      <strong>{Number(opt.price) > 0 ? `+ R$ ${Number(opt.price).toFixed(2)}` : ''}</strong>
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
-
-            <button
-              onClick={adicionarAoCarrinho}
-              disabled={!podeAdicionar()}
-              style={{
-                width: '100%',
-                padding: '15px',
-                background: podeAdicionar() ? '#27ae60' : '#ccc',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                fontWeight: 'bold',
-                fontSize: '16px',
-                cursor: 'pointer',
-              }}
-            >
-              Adicionar ao Pedido
-            </button>
-
-            <button
-              onClick={() => setItemSelecionado(null)}
-              style={{ width: '100%', marginTop: '10px', background: 'none', border: 'none', color: '#636e72', cursor: 'pointer' }}
-            >
-              Cancelar
-            </button>
-          </div>
         </div>
-      )}
 
-      {/* RESUMO */}
-      {showResumo && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 110, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ background: 'white', width: '100%', maxWidth: '500px', borderRadius: '20px 20px 0 0', padding: '25px', maxHeight: '80vh', overflowY: 'auto' }}>
-            <h2 style={{ margin: 0, marginBottom: '20px' }}>📝 Itens para enviar</h2>
+        {/* Categorias (pills estilo online) */}
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingTop: 12 }}>
+          {categorias.map((c) => {
+            const active = c === selectedCategory;
+            return (
+              <button
+                key={c}
+                onClick={() => setSelectedCategory(c)}
+                style={{
+                  whiteSpace: "nowrap",
+                  border: active ? "1px solid #b30000" : "1px solid #eaeaea",
+                  background: active ? "#b30000" : "white",
+                  color: active ? "white" : "#2d3436",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                  fontSize: 12,
+                }}
+              >
+                {c}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-            {carrinho.map((item: any, idx: number) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', padding: '10px 0' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 'bold' }}>{item.name}</div>
-                  {item.observation && <div style={{ fontSize: '12px', color: '#e17055' }}>Obs: {item.observation}</div>}
-                  <div style={{ fontSize: '11px', color: '#666' }}>{(item.optionItemIds || []).length} opcionais selecionados</div>
-                </div>
+      {/* Lista */}
+      <div style={{ padding: 14 }}>
+        {loading ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#636e72" }}>Carregando produtos...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#636e72" }}>Nenhum produto nessa categoria.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+            {filtered.map((p) => {
+              const badge = getPromoBadgeForProduct(p);
+
+              return (
                 <button
-                  onClick={() => removerDoCarrinho(idx)}
-                  style={{ background: '#d63031', color: 'white', border: 'none', borderRadius: '8px', padding: '8px', cursor: 'pointer' }}
+                  key={p.id}
+                  onClick={() => openBuyModal(p.id)}
+                  style={{
+                    textAlign: "left",
+                    border: "1px solid #eee",
+                    background: "white",
+                    borderRadius: 16,
+                    padding: 12,
+                    cursor: "pointer",
+                    display: "flex",
+                    gap: 12,
+                    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+                  }}
                 >
-                  🗑️
+                  <div
+                    style={{
+                      width: 72,
+                      height: 72,
+                      borderRadius: 14,
+                      background: "#f1f2f6",
+                      overflow: "hidden",
+                      flexShrink: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {p.image && isFoto(p.image) ? (
+                      <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ fontSize: 28 }}>🍽️</div>
+                    )}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.2 }}>{p.name}</div>
+                      <div style={{ fontWeight: 900, color: "#2d3436" }}>{money(p.price)}</div>
+                    </div>
+
+                    {p.description ? (
+                      <div style={{ marginTop: 6, color: "#636e72", fontSize: 12, lineHeight: 1.25 }}>
+                        {p.description}
+                      </div>
+                    ) : null}
+
+                    {badge ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "inline-block",
+                          background: "#fff3cd",
+                          border: "1px solid #ffeeba",
+                          color: "#8a6d3b",
+                          padding: "6px 8px",
+                          borderRadius: 10,
+                          fontSize: 11,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {badge}
+                      </div>
+                    ) : null}
+                  </div>
                 </button>
-              </div>
-            ))}
-
-            <button onClick={() => setShowResumo(false)} style={{ width: '100%', marginTop: '20px', padding: '15px', background: '#2d3436', color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>
-              Voltar
-            </button>
+              );
+            })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* FOOTER FIXO */}
-      {carrinho.length > 0 && (
+      {/* Modal compra - mesmo do online */}
+      <ProductBuyModal
+        open={buyOpen}
+        productId={buyProductId}
+        onClose={() => setBuyOpen(false)}
+        onAdded={() => {}}
+      />
+
+      {/* Resumo */}
+      {resumeOpen && (
         <div
           style={{
-            position: 'fixed',
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            zIndex: 50,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+          onClick={() => setResumeOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 720,
+              background: "white",
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+              padding: 14,
+              maxHeight: "82dvh",
+              overflow: "auto",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>🧾 Resumo da Mesa</div>
+              <button
+                onClick={() => setResumeOpen(false)}
+                style={{ border: "1px solid #eee", background: "white", borderRadius: 12, padding: "10px 12px", cursor: "pointer" }}
+              >
+                Fechar
+              </button>
+            </div>
+
+            {/* takeout */}
+            <div style={{ marginTop: 12, background: "#fff5f5", border: "1px solid #fab1a0", padding: 10, borderRadius: 14, display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={isTakeout}
+                onChange={(e) => setIsTakeout(e.target.checked)}
+                style={{ width: 22, height: 22, cursor: "pointer" }}
+              />
+              <div style={{ fontWeight: 900, color: "#d63031" }}>🛍️ Pedido para viagem?</div>
+            </div>
+
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              {items.map((it, idx) => (
+                <div key={`${it.productId}-${it.optionSummary}-${idx}`} style={{ border: "1px solid #eee", borderRadius: 14, padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900 }}>{it.qty}x {it.name}</div>
+                      {it.optionSummary ? (
+                        <div style={{ color: "#636e72", fontSize: 12, marginTop: 4 }}>
+                          {it.optionSummary}
+                        </div>
+                      ) : null}
+                      {it.notes ? (
+                        <div style={{ color: "#636e72", fontSize: 12, marginTop: 4 }}>
+                          Obs: {it.notes}
+                        </div>
+                      ) : null}
+                      <div style={{ marginTop: 6, fontWeight: 900 }}>
+                        {money(Number(it.unitPrice || 0) * Number(it.qty || 1))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => removeItem(Number(it.productId), it.optionSummary)}
+                      style={{ background: "#d63031", color: "white", border: "none", borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontWeight: 900 }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: 12, borderRadius: 14, background: "#f6f7fb", border: "1px solid #eee" }}>
+              <div style={{ fontWeight: 900, fontSize: 14 }}>Total</div>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>{money(total)}</div>
+            </div>
+
+            <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+              <button
+                onClick={() => {
+                  if (confirm("Limpar itens desta mesa?")) clear();
+                }}
+                style={{ flex: 1, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white", cursor: "pointer", fontWeight: 900 }}
+              >
+                Limpar
+              </button>
+
+              <button
+                onClick={enviarPedido}
+                style={{ flex: 2, padding: 14, borderRadius: 14, border: "none", background: "#0984e3", color: "white", cursor: "pointer", fontWeight: 900 }}
+              >
+                ✅ Enviar para Cozinha
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Footer fixo */}
+      {items.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
             bottom: 0,
             left: 0,
             right: 0,
-            background: 'white',
-            padding: '15px',
-            borderTop: '2px solid #eee',
-            boxShadow: '0 -2px 10px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
+            background: "white",
+            padding: 12,
+            borderTop: "1px solid #eee",
+            boxShadow: "0 -4px 16px rgba(0,0,0,0.06)",
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', background: '#fff5f5', padding: '8px', borderRadius: '10px', border: '1px solid #fab1a0' }}>
-            <input type="checkbox" id="takeout" checked={isTakeout} onChange={(e) => setIsTakeout(e.target.checked)} style={{ width: '22px', height: '22px', cursor: 'pointer' }} />
-            <label htmlFor="takeout" style={{ fontWeight: 'bold', color: '#d63031', fontSize: '14px', cursor: 'pointer' }}>
-              🛍️ PEDIDO PARA VIAGEM?
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", gap: 10 }}>
             <button
-              onClick={() => setShowResumo(true)}
-              style={{ flex: 1, padding: '15px', background: '#e17055', color: 'white', borderRadius: '10px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+              onClick={() => setResumeOpen(true)}
+              style={{ flex: 1, padding: 14, background: "#e17055", color: "white", border: "none", borderRadius: 14, fontWeight: 900, cursor: "pointer" }}
             >
-              📝 Conferir ({carrinho.length})
+              📝 Conferir ({itemsCount})
             </button>
             <button
               onClick={enviarPedido}
-              style={{ flex: 1.5, padding: '15px', background: '#0984e3', color: 'white', borderRadius: '10px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+              style={{ flex: 1.2, padding: 14, background: "#0984e3", color: "white", border: "none", borderRadius: 14, fontWeight: 900, cursor: "pointer" }}
             >
-              ✅ Enviar para Cozinha
+              ✅ Enviar ({money(total)})
             </button>
           </div>
         </div>
       )}
     </div>
-  )
+  );
+}
+
+export default function PedidoMesa() {
+  const { tableId } = useParams();
+  if (!tableId) return null;
+
+  // ✅ Carrinho separado por mesa (não mistura com o online nem com outra mesa)
+  return (
+    <CartProvider storageKey={`cart_mesa_${tableId}`}>
+      <PedidoMesaInner tableId={tableId} />
+    </CartProvider>
+  );
 }

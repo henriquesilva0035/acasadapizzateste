@@ -25,9 +25,10 @@ type CartContextData = {
 };
 
 const CartContext = createContext<CartContextData>({} as CartContextData);
-const STORAGE_KEY = "cart_online_v2";
+const DEFAULT_STORAGE_KEY = "cart_online_v2";
 
-export function CartProvider({ children }: { children: React.ReactNode }) {
+export function CartProvider({ children, storageKey }: { children: React.ReactNode; storageKey?: string }) {
+  const STORAGE_KEY = storageKey || DEFAULT_STORAGE_KEY;
   const [items, setItems] = useState<CartItem[]>([]);
 
   useEffect(() => {
@@ -35,11 +36,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setItems(JSON.parse(raw));
     } catch {}
-  }, []);
+  }, [STORAGE_KEY]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items]);
+  }, [items, STORAGE_KEY]);
 
   function addItem(item: Omit<CartItem, "qty">, qty: number = 1) {
     setItems((prev) => {
@@ -83,7 +84,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const total = useMemo(() => {
     return items.reduce((acc, it) => acc + it.unitPrice * it.qty, 0);
-  }, [items]);
+  }, [items, STORAGE_KEY]);
 
   return (
     <CartContext.Provider value={{ items, addItem, removeItem, setQty, clear, total }}>

@@ -1,6 +1,7 @@
+import { API_URL as CONFIG_API_URL } from "../config";
 import { io, Socket } from "socket.io-client";
 
-export const API_URL = String((import.meta as any)?.env?.VITE_API_URL || "http://localhost:3333").replace(/\/$/, "");
+export const API_URL = String((import.meta as any)?.env?.VITE_API_URL || CONFIG_API_URL || "http://localhost:3333").replace(/\/$/, "");
 
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}) {
   const url = `${API_URL}${path}`;
